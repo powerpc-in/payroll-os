@@ -333,6 +333,18 @@ export interface WebhookConfig {
   events: string[];
   active: boolean;
   created_at?: string;
+  last_success_at?: string | null;
+  last_failure_at?: string | null;
+  last_error?: string | null;
+  failed_deliveries?: number;
+}
+
+export interface WebhookAttempt {
+  attempt: number;
+  at: string;
+  status_code?: number | null;
+  error?: string | null;
+  duration_ms?: number;
 }
 
 export interface WebhookDelivery {
@@ -340,11 +352,40 @@ export interface WebhookDelivery {
   webhook_id: string;
   event: string;
   url: string;
+  status: string;
   success: boolean;
   status_code?: number | null;
   attempts: number;
+  attempt_log?: WebhookAttempt[];
   error?: string | null;
+  next_retry_at?: string | null;
+  delivered_at?: string | null;
   created_at: string;
+}
+
+export interface WebhookEventInfo {
+  event: string;
+  category: string;
+  webhook: boolean;
+  notify: boolean;
+}
+
+export interface DeliveryFeed {
+  items: WebhookDelivery[];
+  counts: { success: number; failed: number; pending: number };
+}
+
+export interface NotificationChannel {
+  key: string;
+  label: string;
+  configured: boolean;
+  enabled: boolean;
+  note: string;
+}
+
+export interface NotificationChannelState {
+  channels: NotificationChannel[];
+  events: WebhookEventInfo[];
 }
 
 export interface ConfigField {
@@ -408,21 +449,40 @@ export interface TaxComparison {
   error?: string | null;
 }
 
+export interface FFLine {
+  code: string;
+  name: string;
+  amount: number;
+  explanation: Explanation;
+  rule_ref?: RuleRef;
+}
+
 export interface FFSettlement {
   id: string;
   employee_id: string;
   employee_name: string;
   employee_code?: string | null;
+  department?: string | null;
+  joining_date?: string | null;
   last_working_day: string;
+  period?: string;
+  exit_reason?: string | null;
   notes?: string | null;
-  payable: PayLine[];
-  recoveries: PayLine[];
+  payable: FFLine[];
+  recoveries: FFLine[];
   tax_adjustment: number;
   tax_adjustment_note?: string;
   total_payable: number;
   total_recoveries: number;
   net_settlement: number;
   gratuity_note?: string | null;
+  computation_notes?: string[];
+  computed_with_unverified_rules?: boolean;
+  payment_reference?: string | null;
+  approved_by?: string | null;
+  settled_by?: string | null;
+  created_by?: string;
+  created_at?: string;
   status: string;
 }
 
@@ -431,6 +491,8 @@ export interface AppNotification {
   event: string;
   title: string;
   read: boolean;
+  channels?: Record<string, string>;
+  data?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -476,13 +538,26 @@ export interface DashboardData {
   notice?: string;
 }
 
+export interface ReportField {
+  key: string;
+  label: string;
+  numeric: boolean;
+}
+
 export interface ReportDataset {
   key: string;
   name: string;
-  fields: { key: string; label: string; numeric: boolean }[];
+  fields: ReportField[];
   time_field: string | null;
   group_only: string | null;
   flatten: boolean;
+  groupable: string[];
+}
+
+export interface ReportCatalog {
+  datasets: ReportDataset[];
+  aggregations: string[];
+  filter_ops: string[];
 }
 
 export interface ReportResult {
@@ -490,6 +565,9 @@ export interface ReportResult {
   name: string;
   columns: string[];
   labels: Record<string, string>;
+  numeric: string[];
+  group_by?: string | null;
+  aggregate?: string;
   rows: Record<string, unknown>[];
   totals: Record<string, number>;
   count: number;
@@ -499,6 +577,7 @@ export interface SavedReport {
   id: string;
   name: string;
   config: Record<string, unknown>;
+  visualization?: string;
   created_by?: string;
   created_at?: string;
 }

@@ -14,6 +14,7 @@ import Loans from "@/pages/Loans";
 import Payroll from "@/pages/Payroll";
 import PayrollRun from "@/pages/PayrollRun";
 import Reports from "@/pages/Reports";
+import Settlements from "@/pages/Settlements";
 import Compliance from "@/pages/Compliance";
 import Integrations from "@/pages/Integrations";
 import Webhooks from "@/pages/Webhooks";
@@ -46,6 +47,7 @@ export default function App() {
       <Route path="/app/payroll" element={<RequireAuth><AppShell><Payroll /></AppShell></RequireAuth>} />
       <Route path="/app/payroll/:id" element={<RequireAuth><AppShell><PayrollRun /></AppShell></RequireAuth>} />
       <Route path="/app/reports" element={<RequireAuth><AppShell><Reports /></AppShell></RequireAuth>} />
+      <Route path="/app/settlements" element={<RequireAuth><AppShell><Settlements /></AppShell></RequireAuth>} />
       <Route path="/app/compliance" element={<RequireAuth><AppShell><Compliance /></AppShell></RequireAuth>} />
       <Route path="/app/integrations" element={<RequireAuth><AppShell><Integrations /></AppShell></RequireAuth>} />
       <Route path="/app/webhooks" element={<RequireAuth><AppShell><Webhooks /></AppShell></RequireAuth>} />

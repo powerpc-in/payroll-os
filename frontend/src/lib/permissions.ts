@@ -10,7 +10,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "leave.view", "leave.manage", "leave.approve",
     "reimbursements.view", "reimbursements.manage",
     "loans.view", "documents.view", "documents.upload", "documents.delete",
-    "reports.view", "reports.export", "dashboards.view", "audit.view", "self.view",
+    "reports.view", "reports.export", "ff.view", "ff.manage",
+    "dashboards.view", "audit.view", "self.view",
   ],
   PAYROLL_ADMIN: [
     "employees.view", "employees.view_sensitive", "salary.view", "salary.manage",
@@ -19,11 +20,11 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "tax.view", "tax.manage", "attendance.view", "leave.view",
     "reimbursements.view", "reimbursements.approve",
     "loans.view", "loans.manage",
-    "reports.view", "reports.export", "reports.manage",
+    "reports.view", "reports.export", "reports.manage", "ff.view", "ff.manage",
     "dashboards.view", "compliance.view", "audit.view", "self.view",
   ],
   FINANCE: [
-    "employees.view", "payroll.view", "tax.view",
+    "employees.view", "payroll.view", "tax.view", "ff.view",
     "reports.view", "reports.export", "dashboards.view", "compliance.view",
     "audit.view", "self.view",
   ],

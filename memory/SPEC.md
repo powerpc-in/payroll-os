@@ -57,7 +57,40 @@ filters `org_id` from the session context.
 - Demo flow: signup → onboarding → employees → salary assign → attendance →
   reimbursement → payroll run create → calculate → review → approve → lock →
   payslip PDF → reports → employee login → payslip.
-- Webhooks: signed (HMAC-SHA256 `X-Webhook-Signature`), 3 attempts, delivery log.
+- Full & Final (`/app/settlements`, `/api/v1/settlements`): preview (no write) → draft →
+  approve (payroll.approve) → settle (payroll.lock) → statement PDF. `services/ff_engine.py`
+  computes salary payable for days served (skipped if a locked run already covers the month),
+  attendance-driven LOP, leave encashment, notice pay/recovery, bonus/incentive/other,
+  unpaid approved reimbursements, gratuity (versioned rule, fail-safe note when ineligible or
+  rule missing), loan/advance recovery and a manually entered tax adjustment — every line has
+  INPUT/RULE/FORMULA/CALCULATION + `rule_ref`. Settling is exit processing: employee →
+  `exited` + exit_date/reason, salary assignment deactivated, recovered loans closed with a
+  repayment row, settled reimbursements marked paid, `ff.settled` + `employee.terminated`
+  emitted. Settled records are immutable. Statement PDF: `services/ff_statement.py` (fpdf2,
+  transliterates when the DejaVu font is absent). Perms: `ff.view` / `ff.manage`.
+  Legacy `/api/v1/compliance/ff` delegates to the same engine.
+- Reporting engine (`routers/reports.py`): 19 datasets (incl. attendance summary, leave
+  requests, F&F). ReportRun takes dataset + field subset + generic filters
+  (eq/ne/contains/gt/gte/lt/lte) + period range + group_by + aggregate (sum/avg/min/max/count)
+  + sort + limit; aggregation is server-side. Exports CSV/XLSX/PDF (`reports.export`).
+  Saved reports store *configurations* (create/update/delete/run, `reports.manage`) and re-run
+  against live data; the builder UI adds table/bar visualization.
+- Events & webhooks (`lib/events.py`): one `emit()` → audit log + notifications + signed
+  webhook deliveries. `EVENT_CATALOG` (21 events) is the single subscription surface for
+  webhooks *and* future connectors. Deliveries are persisted first (`pending`), then attempted
+  up to 3 times with backoff; every attempt is recorded in `attempt_log` (status, error,
+  duration) and failures keep `next_retry_at` + support manual `POST
+  /webhooks/deliveries/{id}/retry` (appends attempts, never resets). Signature:
+  `X-Webhook-Signature: v1=hmac_sha256(secret, "<timestamp>.<raw_body>")` with
+  `X-Webhook-Timestamp`/`X-Webhook-Delivery`/`X-Webhook-Event`. Org-wide feed +
+  per-endpoint log + counts in the console.
+- Notifications: `NOTIFICATION_CHANNELS` = in_app (live) + email / web_push / mobile_push
+  (registered, `configured: false`). Each notification records per-channel state
+  (`delivered` for in-app, `queued` for the rest) — nothing claims a send that did not happen.
+  Org preferences at `GET/PUT /api/v1/notifications/channels` (`settings.manage`).
+  Payslip-ready alerts fire per employee on payroll lock (`payslip.generated`, with
+  payslip_url in the payload); leave decisions notify the applicant. User↔employee lookups
+  use `memberships.org_id` + `employee_id` (users have no top-level org_id).
 - Integrations: provider registry (Salesforce/Zoho available; QuickBooks/Xero/Slack
   planned). Connection test does a REAL credential check against provider OAuth
   endpoints; syncs without credentials are logged `skipped` — never faked.

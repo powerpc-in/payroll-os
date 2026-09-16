@@ -169,11 +169,18 @@ async def _decide(ctx: Context, request_id: str, approve: bool) -> dict:
         "$set": {"status": "approved" if approve else "rejected",
                  "decided_by": ctx.user["email"], "decided_at": now()},
     })
+    # Notify the requesting employee on every registered channel (in-app now; email /
+    # PWA push / mobile push queue until a provider is configured).
+    applicant = await db.users.find_one({"employee_id": req["employee_id"],
+                                         "memberships.org_id": ctx.org_id})
     await emit(ctx.org_id, "leave.approved" if approve else "leave.rejected", actor=ctx.user,
                entity="leave_request", entity_id=request_id,
                summary=f"Leave {req['leave_code']} ({req['from_date']}→{req['to_date']}) "
                        f"{'approved' if approve else 'rejected'} for {req['employee_name']}",
-               notify_user_ids=[], data={"employee_id": req["employee_id"], "days": req["days"]})
+               notify_user_ids=[applicant["id"]] if applicant else None,
+               data={"employee_id": req["employee_id"], "days": req["days"],
+                     "leave_code": req["leave_code"], "from_date": req["from_date"],
+                     "to_date": req["to_date"]})
     return {"ok": True}
 
 

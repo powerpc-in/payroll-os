@@ -212,6 +212,28 @@ async def lock(run_id: str, ctx: Context = Depends(require_perm("payroll.lock"))
             updates["closed_at"] = now()
         await db.loans.update_one({"id": loan["id"]}, {"$set": updates})
     await db.payroll_runs.update_one({"id": run_id}, {"$set": {"payslips_generated": True}})
+
+    # Payslip-ready alert: one event per employee whose login is linked to their record.
+    # `emit` records it in-app now and queues the email / PWA-push / mobile-push channels
+    # for whenever a provider is configured — the same payload serves all of them.
+    emp_ids = [row["employee_id"] for row in rows if row.get("status") == "ok"]
+    users = await db.users.find({"memberships.org_id": ctx.org_id,
+                                 "employee_id": {"$in": emp_ids}}).to_list(2000)
+    by_emp = {u.get("employee_id"): u for u in users}
+    for row in rows:
+        user = by_emp.get(row["employee_id"])
+        if not user:
+            continue
+        await emit(ctx.org_id, "payslip.generated", actor=ctx.user, entity="payslip",
+                   entity_id=f"{run_id}:{row['employee_id']}",
+                   summary=f"Your payslip for {period} is ready — net "
+                           f"{row.get('net_pay', 0):,.2f}",
+                   notify_user_ids=[user["id"]],
+                   data={"run_id": run_id, "period": period,
+                         "employee_id": row["employee_id"],
+                         "employee_code": (row.get("employee_snapshot") or {}).get("employee_code"),
+                         "net_pay": row.get("net_pay"),
+                         "payslip_url": f"/api/v1/payroll/payslips/{run_id}/{row['employee_id']}"})
     return run
 
 

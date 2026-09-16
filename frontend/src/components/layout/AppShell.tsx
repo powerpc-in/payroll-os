@@ -8,7 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Banknote, Bell, CalendarDays, Building2, ClipboardList, Download, FileSpreadsheet,
   Gauge, HandCoins, Landmark, LogOut, Menu, Plane, Receipt, RefreshCcw,
-  Settings, ShieldCheck, Users, Wallet, WifiOff, Plug, Webhook,
+  Settings, ShieldCheck, Users, UserMinus, Wallet, WifiOff, Plug, Webhook,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/app/loans", label: "Loans & Advances", icon: HandCoins, perm: "loans.view", section: "Operate" },
   { to: "/app/payroll", label: "Payroll Runs", icon: Banknote, perm: "payroll.view", section: "Payroll" },
   { to: "/app/reports", label: "Reports", icon: FileSpreadsheet, perm: "reports.view", section: "Payroll" },
+  { to: "/app/settlements", label: "Full & Final", icon: UserMinus, perm: "ff.view", section: "Payroll" },
   { to: "/app/compliance", label: "Compliance Rules", icon: ShieldCheck, perm: "compliance.view", section: "Payroll" },
   { to: "/app/integrations", label: "Integrations", icon: Plug, perm: "integrations.manage", section: "Platform" },
   { to: "/app/webhooks", label: "Webhooks", icon: Webhook, perm: "webhooks.manage", section: "Platform" },

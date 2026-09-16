@@ -94,19 +94,43 @@ DATASETS: dict[str, dict] = {
                          _f("emi", "EMI", True), _f("outstanding", "Outstanding", True),
                          _f("interest_rate", "Interest %", True), _f("status", "Status")]},
     "ff": {"name": "Full & Final Settlements", "collection": "ffs", "time_field": None,
-           "fields": [_f("employee_name", "Employee"), _f("last_working_day", "LWD"),
+           "fields": [_f("employee_name", "Employee"), _f("employee_code", "Employee ID"),
+                      _f("department", "Department"), _f("last_working_day", "LWD"),
                       _f("total_payable", "Payable", True), _f("total_recoveries", "Recoveries", True),
+                      _f("tax_adjustment", "Tax adjustment", True),
                       _f("net_settlement", "Net Settlement", True), _f("status", "Status")]},
+    "attendance": {"name": "Attendance summary", "collection": "attendance", "time_field": "date",
+                   "fields": [_f("employee_code", "Employee ID"), _f("employee_name", "Employee"),
+                              _f("present", "Present", True), _f("absent", "Absent", True),
+                              _f("half_day", "Half days", True), _f("paid_leave", "Paid leave", True),
+                              _f("unpaid_leave", "Unpaid leave", True),
+                              _f("overtime_hours", "OT hours", True), _f("lop", "LOP days", True)]},
+    "leave": {"name": "Leave requests", "collection": "leave_requests", "time_field": None,
+              "fields": [_f("employee_name", "Employee"), _f("leave_type_name", "Leave type"),
+                         _f("from_date", "From"), _f("to_date", "To"),
+                         _f("days", "Days", True), _f("paid", "Paid"), _f("status", "Status")]},
 }
+
+AGGREGATIONS = ["sum", "avg", "min", "max", "count"]
+FILTER_OPS = ["eq", "ne", "contains", "gt", "gte", "lt", "lte"]
+
+
+class ReportFilter(BaseModel):
+    field: str
+    op: str = "eq"
+    value: str = ""
 
 
 class ReportRun(BaseModel):
     dataset: str
+    fields: list[str] | None = None          # column subset; None → every dataset field
+    filters: list[ReportFilter] = []         # generic field/op/value filters
     period_from: str | None = None
     period_to: str | None = None
     department: str | None = None
     location: str | None = None
     group_by: str | None = None
+    aggregate: str = "sum"                   # applied to numeric columns when grouping
     sort_by: str | None = None
     sort_dir: str = "asc"
     limit: int = 500
@@ -183,27 +207,79 @@ async def _rows_for(ctx: Context, cfg: dict, r: ReportRun) -> list[dict]:
         rows = [x for x in rows if x.get("department") == r.department]
     if r.location:
         rows = [x for x in rows if x.get("location") == r.location]
+    for flt in r.filters:
+        rows = [x for x in rows if _matches(x.get(flt.field), flt)]
     return rows
+
+
+def _matches(value, flt: ReportFilter) -> bool:
+    """Generic field/op/value predicate. Numeric ops coerce; text ops compare lowercased."""
+    target = flt.value
+    if flt.op in ("gt", "gte", "lt", "lte"):
+        try:
+            left, right = float(value), float(target)
+        except (TypeError, ValueError):
+            return False
+        return {"gt": left > right, "gte": left >= right,
+                "lt": left < right, "lte": left <= right}[flt.op]
+    left_s = "" if value is None else str(value).lower()
+    right_s = str(target).lower()
+    if flt.op == "contains":
+        return right_s in left_s
+    if flt.op == "ne":
+        return left_s != right_s
+    return left_s == right_s
+
+
+def _aggregate(values: list[float], how: str) -> float:
+    if not values:
+        return 0.0
+    if how == "avg":
+        return round(sum(values) / len(values), 2)
+    if how == "min":
+        return round(min(values), 2)
+    if how == "max":
+        return round(max(values), 2)
+    if how == "count":
+        return float(len(values))
+    return round(sum(values), 2)
 
 
 def _project(rows: list[dict], cfg: dict, r: ReportRun) -> tuple[list[str], list[dict], dict]:
     fields = cfg["fields"]
+    if r.fields:
+        chosen = [f for f in fields if f["key"] in r.fields]
+        if chosen:
+            fields = chosen
+    how = r.aggregate if r.aggregate in AGGREGATIONS else "sum"
     if cfg.get("group_only"):
         r.group_by = cfg["group_only"]
     if r.group_by:
-        grouped: dict[str, dict] = {}
+        buckets: dict[str, dict[str, list[float]]] = {}
+        counts: dict[str, int] = {}
         for row in rows:
             key = str(row.get(r.group_by) or "—")
-            g = grouped.setdefault(key, {"group": key, "headcount": 0,
-                                         **{f["key"]: 0.0 for f in fields if f["numeric"] and f["key"] != "headcount"}})
-            g["headcount"] += 1
+            counts[key] = counts.get(key, 0) + 1
+            bucket = buckets.setdefault(key, {})
             for f in fields:
                 if f["numeric"] and f["key"] != "headcount":
-                    g[f["key"]] = round(g[f["key"]] + (row.get(f["key"]) or 0), 2)
-        out = list(grouped.values())
-        columns = [f["key"] for f in fields]
-        totals = {f["key"]: round(sum(x.get(f["key"], 0) for x in out), 2)
-                  for f in fields if f["numeric"]}
+                    bucket.setdefault(f["key"], []).append(float(row.get(f["key"]) or 0))
+        out = []
+        for key, bucket in buckets.items():
+            grouped_row: dict = {"group": key, "headcount": counts[key]}
+            for f in fields:
+                if f["numeric"] and f["key"] != "headcount":
+                    grouped_row[f["key"]] = _aggregate(bucket.get(f["key"], []), how)
+            out.append(grouped_row)
+        columns = ["group", "headcount"] + [f["key"] for f in fields
+                                            if f["numeric"] and f["key"] not in ("group", "headcount")]
+        if r.sort_by in columns:
+            out.sort(key=lambda x: (x.get(r.sort_by) is None, x.get(r.sort_by)),
+                     reverse=r.sort_dir == "desc")
+        else:
+            out.sort(key=lambda x: x["group"])
+        totals = {c: round(sum(float(x.get(c) or 0) for x in out), 2)
+                  for c in columns if c != "group"}
         return columns, out, totals
 
     keys = [f["key"] for f in fields]
@@ -266,12 +342,21 @@ def _export_response(columns: list[str], rows: list[dict], fmt: str, name: str):
     raise HTTPException(status_code=422, detail="format must be csv, xlsx or pdf")
 
 
+GROUPABLE = ["department", "location", "cost_centre", "employee_code", "period", "state", "status"]
+
+
 @router.get("/datasets")
 async def datasets(ctx: Context = Depends(require_perm("reports.view"))):
-    return [{"key": k, "name": v["name"],
-             "fields": v["fields"], "time_field": v.get("time_field"),
-             "group_only": v.get("group_only"), "flatten": bool(v.get("flatten"))}
-            for k, v in DATASETS.items()]
+    return {
+        "datasets": [{"key": k, "name": v["name"],
+                      "fields": v["fields"], "time_field": v.get("time_field"),
+                      "group_only": v.get("group_only"), "flatten": bool(v.get("flatten")),
+                      "groupable": [g for g in GROUPABLE
+                                    if g in {f["key"] for f in v["fields"]} or g == v.get("group_only")]}
+                     for k, v in DATASETS.items()],
+        "aggregations": AGGREGATIONS,
+        "filter_ops": FILTER_OPS,
+    }
 
 
 @router.post("/run")
@@ -281,8 +366,13 @@ async def run_report(r: ReportRun, ctx: Context = Depends(require_perm("reports.
         raise HTTPException(status_code=404, detail=f"Unknown dataset '{r.dataset}'")
     rows = await _rows_for(ctx, cfg, r)
     columns, out, totals = _project(rows, cfg, r)
+    labels = {f["key"]: f["label"] for f in cfg["fields"]}
+    labels.update({"group": (r.group_by or "Group").replace("_", " ").title(),
+                   "headcount": "Rows"})
     return {"dataset": r.dataset, "name": cfg["name"], "columns": columns,
-            "labels": {f["key"]: f["label"] for f in cfg["fields"]},
+            "labels": labels, "numeric": [f["key"] for f in cfg["fields"] if f["numeric"]]
+            + ["headcount"],
+            "group_by": r.group_by, "aggregate": r.aggregate,
             "rows": out, "totals": totals, "count": len(out)}
 
 
@@ -300,6 +390,7 @@ async def export_report(r: ReportRun, format: str = "csv",
 class SavedReportIn(BaseModel):
     name: str
     config: dict
+    visualization: str = "table"   # table | bar | line — chosen by the builder UI
 
 
 @router.get("/saved")
@@ -313,10 +404,39 @@ async def list_saved(ctx: Context = Depends(require_perm("reports.view"))):
 @router.post("/saved")
 async def save_report(input: SavedReportIn, ctx: Context = Depends(require_perm("reports.manage"))):
     doc = {"id": new_id(), "org_id": ctx.org_id, "name": input.name, "config": input.config,
+           "visualization": input.visualization,
            "created_by": ctx.user["email"], "created_at": datetime.now(timezone.utc)}
     await db.saved_reports.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@router.put("/saved/{saved_id}")
+async def update_saved(saved_id: str, input: SavedReportIn,
+                       ctx: Context = Depends(require_perm("reports.manage"))):
+    res = await db.saved_reports.update_one(
+        {"id": saved_id, "org_id": ctx.org_id},
+        {"$set": {"name": input.name, "config": input.config,
+                  "visualization": input.visualization,
+                  "updated_at": datetime.now(timezone.utc)}})
+    if not res.matched_count:
+        raise HTTPException(status_code=404, detail="Saved report not found")
+    return await db.saved_reports.find_one({"id": saved_id}, {"_id": 0})
+
+
+@router.post("/saved/{saved_id}/run")
+async def run_saved(saved_id: str, ctx: Context = Depends(require_perm("reports.view"))):
+    """Runs a stored configuration against live data — saved reports are configurations,
+    never cached result sets."""
+    doc = await db.saved_reports.find_one({"id": saved_id, "org_id": ctx.org_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Saved report not found")
+    try:
+        r = ReportRun(**{k: v for k, v in (doc.get("config") or {}).items()
+                         if k in ReportRun.model_fields})
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Saved configuration is invalid: {exc}") from exc
+    return await run_report(r, ctx)
 
 
 @router.delete("/saved/{saved_id}")
