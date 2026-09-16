@@ -1,0 +1,1 @@
+# Jurisdiction modules package — India is implemented in registry + seed data; other countries register here as modules without touching core engine code.

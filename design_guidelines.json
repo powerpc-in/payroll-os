@@ -1,0 +1,252 @@
+{
+  "theme": "light_first_with_dark_mode_support",
+  "archetype": "THE_SWISS_AND_HIGH_CONTRAST_FINTECH",
+  "fonts": {
+    "heading": "Outfit Variable",
+    "sans": "Plus Jakarta Sans Variable",
+    "mono": "JetBrains Mono Variable",
+    "fontsource_imports": [
+      "@fontsource-variable/outfit",
+      "@fontsource-variable/plus-jakarta-sans",
+      "@fontsource-variable/jetbrains-mono"
+    ]
+  },
+  "typography": {
+    "scale_px": {
+      "display": 56,
+      "h1": 44,
+      "h2": 32,
+      "h3": 22,
+      "h4": 18,
+      "body": 15,
+      "caption": 13
+    },
+    "letter_spacing": {
+      "display": "-0.035em",
+      "h1": "-0.03em",
+      "h2": "-0.025em",
+      "h3": "-0.015em",
+      "body": "-0.005em",
+      "label": "0.08em"
+    },
+    "font_weights": {
+      "heading_bold": "700",
+      "heading_medium": "600",
+      "body_regular": "400",
+      "body_medium": "500",
+      "numeric_mono": "500"
+    }
+  },
+  "colors": {
+    "primary": "#0F172A",
+    "primary_foreground": "#FFFFFF",
+    "accent": "#2563EB",
+    "on_accent": "#FFFFFF",
+    "surfaces": [
+      {
+        "name": "page",
+        "kind": "solid",
+        "bg": "#F8FAFC",
+        "on_bg": "#0F172A",
+        "on_bg_muted": "#475569",
+        "roles": {
+          "link": "#2563EB",
+          "error": "#DC2626",
+          "success": "#16A34A",
+          "warning": "#D97706"
+        }
+      },
+      {
+        "name": "panel",
+        "kind": "solid",
+        "bg": "#FFFFFF",
+        "on_bg": "#0F172A",
+        "on_bg_muted": "#64748B",
+        "roles": {
+          "border": "#E2E8F0",
+          "link": "#2563EB",
+          "error": "#DC2626",
+          "success": "#16A34A",
+          "warning": "#D97706"
+        }
+      },
+      {
+        "name": "sidebar",
+        "kind": "solid",
+        "bg": "#0F172A",
+        "on_bg": "#F8FAFC",
+        "on_bg_muted": "#94A3B8",
+        "roles": {
+          "active_bg": "#1E293B",
+          "active_text": "#38BDF8",
+          "border": "#334155"
+        }
+      },
+      {
+        "name": "dark_page",
+        "kind": "solid",
+        "bg": "#0B0F17",
+        "on_bg": "#F8FAFC",
+        "on_bg_muted": "#94A3B8",
+        "roles": {
+          "link": "#60A5FA",
+          "error": "#F87171",
+          "success": "#4ADE80",
+          "warning": "#FBBF24"
+        }
+      },
+      {
+        "name": "dark_panel",
+        "kind": "solid",
+        "bg": "#131B2A",
+        "on_bg": "#F8FAFC",
+        "on_bg_muted": "#94A3B8",
+        "roles": {
+          "border": "#1E293B",
+          "link": "#60A5FA",
+          "error": "#F87171",
+          "success": "#4ADE80",
+          "warning": "#FBBF24"
+        }
+      },
+      {
+        "name": "badge_draft",
+        "kind": "solid",
+        "bg": "#F1F5F9",
+        "on_bg": "#334155",
+        "on_bg_muted": "#64748B"
+      },
+      {
+        "name": "badge_calculated",
+        "kind": "solid",
+        "bg": "#EFF6FF",
+        "on_bg": "#1D4ED8",
+        "on_bg_muted": "#3B82F6"
+      },
+      {
+        "name": "badge_review",
+        "kind": "solid",
+        "bg": "#FFFBEB",
+        "on_bg": "#B45309",
+        "on_bg_muted": "#D97706"
+      },
+      {
+        "name": "badge_approved",
+        "kind": "solid",
+        "bg": "#ECFDF5",
+        "on_bg": "#047857",
+        "on_bg_muted": "#059669"
+      },
+      {
+        "name": "badge_locked",
+        "kind": "solid",
+        "bg": "#F3E8FF",
+        "on_bg": "#6B21A8",
+        "on_bg_muted": "#7E22CE"
+      },
+      {
+        "name": "badge_statutory_verification",
+        "kind": "solid",
+        "bg": "#FEF3C7",
+        "on_bg": "#92400E",
+        "on_bg_muted": "#B45309"
+      }
+    ]
+  },
+  "entry_surfaces": {
+    "/": "split branded dashboard shell — left navy persistent sidebar, top glass metric bar, central dense payroll operations bento grid",
+    "/login": "split auth portal — left branded deep-navy compliance assurance hero, right high-contrast fast credential panel with role switcher demo pills",
+    "/onboarding": "guided 8-step enterprise setup wizard — top sticky stage progress ribbon, central elevated interactive configuration form, live breakdown right drawer"
+  },
+  "layout_and_grids": {
+    "shell_layout": {
+      "desktop": "fixed sidebar (260px) + top header (64px) + fluid main container with max-w-[1600px] p-6 lg:p-8",
+      "mobile": "top app bar (56px) + fluid main container (p-4) + fixed bottom nav bar (64px with safe-area-inset-bottom)",
+      "pwa": "standalone manifest with mobile touch targets >= 44px, bottom-anchored actions, offline state banner"
+    },
+    "grid_modes": {
+      "dashboard_bento": "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5",
+      "payroll_workflow_stage": "flex flex-col lg:flex-row items-stretch gap-4 p-4 rounded-xl border border-border bg-card",
+      "employee_drawer_grid": "grid grid-cols-1 md:grid-cols-2 gap-4",
+      "tax_regime_comparison": "grid grid-cols-1 md:grid-cols-2 gap-6"
+    }
+  },
+  "component_design_specs": {
+    "payroll_status_badges": {
+      "DRAFT": "bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 font-medium px-2.5 py-0.5 text-xs rounded-full inline-flex items-center gap-1.5",
+      "CALCULATED": "bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800 font-medium px-2.5 py-0.5 text-xs rounded-full inline-flex items-center gap-1.5",
+      "REVIEW": "bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800 font-medium px-2.5 py-0.5 text-xs rounded-full inline-flex items-center gap-1.5",
+      "APPROVED": "bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 font-medium px-2.5 py-0.5 text-xs rounded-full inline-flex items-center gap-1.5",
+      "LOCKED": "bg-purple-50 text-purple-800 border border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800 font-medium px-2.5 py-0.5 text-xs rounded-full inline-flex items-center gap-1.5"
+    },
+    "dense_data_table": {
+      "container": "rounded-xl border border-border bg-card overflow-hidden shadow-sm",
+      "header_row": "bg-muted/50 text-muted-foreground text-xs uppercase tracking-wider font-semibold border-b border-border",
+      "data_row": "hover:bg-muted/40 transition-colors border-b border-border/60 text-sm",
+      "numeric_cells": "font-mono text-right tabular-nums text-foreground font-medium",
+      "actions_cell": "text-right pr-4"
+    },
+    "calculation_explanation_drawer": {
+      "sheet_width": "sm:max-w-[580px] w-full",
+      "breakdown_group": "p-4 rounded-lg bg-muted/40 border border-border/80 space-y-2.5",
+      "formula_pill": "font-mono text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 inline-block",
+      "step_audit_item": "flex items-start justify-between py-1.5 border-b border-border/40 last:border-b-0 text-xs"
+    },
+    "onboarding_wizard": {
+      "step_indicator": "flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none",
+      "active_step": "bg-primary text-primary-foreground font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-2 shrink-0 shadow-sm",
+      "completed_step": "bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-2 shrink-0 border border-emerald-200 dark:border-emerald-800",
+      "upcoming_step": "bg-muted text-muted-foreground px-3 py-1.5 rounded-lg text-xs flex items-center gap-2 shrink-0 border border-border"
+    },
+    "mobile_card_transformation": {
+      "breakpoint": "md:hidden",
+      "card_style": "p-4 rounded-xl border border-border bg-card shadow-sm space-y-3 mb-3",
+      "key_val_row": "flex items-center justify-between text-xs py-1 border-b border-border/30 last:border-b-0"
+    }
+  },
+  "motion": {
+    "preference": "fast_snappy_no_unnecessary_animations",
+    "transitions": {
+      "drawer": "transition-transform duration-200 ease-out",
+      "hover_lift": "transition-transform duration-150 ease-in-out hover:-translate-y-0.5",
+      "tab_switch": "transition-opacity duration-150 ease-linear",
+      "status_pulse": "animate-pulse duration-1000"
+    },
+    "reduced_motion": "motion-reduce:transition-none motion-reduce:transform-none"
+  },
+  "accessibility": {
+    "contrast_ratio_minimum": "4.5:1 for body and data text, 3:1 for large display headers",
+    "numeric_accessibility": "Always use font-mono tabular-nums for financial amounts (INR ₹), tax deductions, EPF, ESIC, and PT values",
+    "data_testid_convention": "All actionable buttons, dropdowns, tab items, filters, modals, and metric cards MUST have data-testid in kebab-case (e.g. data-testid='run-payroll-button', data-testid='employee-calculation-drawer-trigger')",
+    "screen_readers": "All status indicators have aria-label along with badge text. Currency symbols clearly designated"
+  },
+  "image_urls": {
+    "dashboard_mockups": [
+      {
+        "url": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBmaW50ZWNoJTIwc29mdHdhcmUlMjBkYXNoYm9hcmQlMjBhbmFseXRpY3N8ZW58MHx8fHwxNzg5NTYwOTkzfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Clean analytics dashboard showing financial and operational performance metrics",
+        "usage": "Use for Auth screen marketing showcase side-panel and guided tour illustration"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1686061594225-3e92c0cd51b0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHw0fHxtb2Rlcm4lMjBmaW50ZWNoJTIwc29mdHdhcmUlMjBkYXNoYm9hcmQlMjBhbmFseXRpY3N8ZW58MHx8fHwxNzg5NTYwOTkzfDA&ixlib=rb-4.1.0&q=85",
+        "description": "High-density enterprise data analytics UI display",
+        "usage": "Use for Onboarding welcome illustration and Reporting module hero context"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Theme implementation: Update frontend/src/index.css with @fontsource-variable/outfit for headings, @fontsource-variable/plus-jakarta-sans for sans/body, and @fontsource-variable/jetbrains-mono for mono.",
+    "Navigation & Shell: Create a unified responsive app shell in frontend/src/components/layout/AppShell.tsx featuring a desktop 260px dark sidebar with collapsible state, top navbar with role switcher dropdown (Admin, HR, Finance, Employee Self-Service) and tenant selector, and a dedicated mobile bottom navigation bar.",
+    "Payroll Engine & State Workflow: Represent the lifecycle transitions clearly with interactive state buttons and status badges for DRAFT -> CALCULATED -> REVIEW -> APPROVED -> LOCKED.",
+    "Calculation Breakdown Drawer: Use shadcn Sheet component (frontend/src/components/ui/sheet.tsx) for the employee salary calculation inspection, showing Indian statutory deductions (EPF 12%, EPS, ESIC 0.75%/3.25%, Professional Tax slab, TDS with Old vs New regime rebate §87A) with exact formula breakdown.",
+    "Data Tables & Mobile Responsiveness: Render dense desktop data tables with sticky header and sort/filter capabilities, and automatically transform into stacked key-value cards on mobile viewports (<768px).",
+    "PWA Readiness: Include web app manifest metadata and install trigger component for mobile and desktop PWA installability.",
+    "Testing Attributes: Ensure every interactive button, input, tab, select, and status badge contains a descriptive data-testid attribute for end-to-end automated testing."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": {
+    "spacing": "Generous container padding (p-6 to p-8 desktop, p-4 mobile). No cramped headers.",
+    "numeric_precision": "All currency values in Indian Rupees (₹) must be formatted with locale 'en-IN' and rendered with tabular-nums.",
+    "no_universal_transition": "Never apply global transition: all. Use targeted hover and active classes.",
+    "no_ai_slop_emojis": "Never use AI robot emojis for icons. Use strictly Lucide-react SVG glyphs."
+  }
+}
