@@ -85,7 +85,7 @@ async def approve(reimbursement_id: str, input: ApproveIn,
         raise HTTPException(status_code=409, detail=f"Claim already {doc['status']}")
     if input.approved_amount > doc["amount"]:
         raise HTTPException(status_code=422, detail="Approved amount cannot exceed claimed amount")
-    await db.reimbursements.update_one({"id": reimbursement_id}, {
+    await db.reimbursements.update_one({"id": reimbursement_id, "org_id": ctx.org_id}, {
         "$set": {"status": "approved", "approved_amount": input.approved_amount,
                  "decided_by": ctx.user["email"], "decided_at": now()},
     })
@@ -108,7 +108,7 @@ async def reject(reimbursement_id: str, input: RejectIn,
         raise HTTPException(status_code=404, detail="Reimbursement not found")
     if doc["status"] != "pending":
         raise HTTPException(status_code=409, detail=f"Claim already {doc['status']}")
-    await db.reimbursements.update_one({"id": reimbursement_id}, {
+    await db.reimbursements.update_one({"id": reimbursement_id, "org_id": ctx.org_id}, {
         "$set": {"status": "rejected", "decided_by": ctx.user["email"], "decided_at": now(),
                  "reject_reason": input.reason},
     })

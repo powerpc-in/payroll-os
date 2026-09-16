@@ -179,7 +179,7 @@ async def settle(ff_id: str, input: SettleIn,
                 "employee_id": doc["employee_id"], "period": doc["period"],
                 "emi": loan.get("outstanding", 0), "principal": loan.get("outstanding", 0),
                 "interest": 0, "paid_via": f"settlement:{ff_id}", "created_at": now()})
-            await db.loans.update_one({"id": lid}, {"$set": {
+            await db.loans.update_one({"id": lid, "org_id": ctx.org_id}, {"$set": {
                 "outstanding": 0, "status": "closed", "closed_at": now(),
                 "closed_via_settlement_id": ff_id}})
 

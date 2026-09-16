@@ -260,7 +260,8 @@ async def create_org_user(input: OrgUserIn, ctx: Context = Depends(require_perm(
     }
     await db.users.insert_one(user)
     if input.employee_id:
-        await db.employees.update_one({"id": input.employee_id}, {"$set": {"user_id": user["id"]}})
+        await db.employees.update_one({"id": input.employee_id, "org_id": ctx.org_id},
+                                     {"$set": {"user_id": user["id"]}})
     await emit(ctx.org_id, "user.created", actor=ctx.user, entity="user", entity_id=user["id"],
                summary=f"User {email} added with role {input.role}")
     return {"id": user["id"], "email": email, "role": input.role}

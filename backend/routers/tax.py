@@ -40,7 +40,8 @@ async def _comparison(org: dict, emp: dict, period: str | None) -> dict:
         {"org_id": org["id"], "employee_id": emp["id"], "active": True})
     if not assignment:
         raise HTTPException(status_code=400, detail="No active salary assignment for this employee")
-    structure = await db.salary_structures.find_one({"id": assignment["structure_id"]})
+    structure = await db.salary_structures.find_one(
+        {"id": assignment["structure_id"], "org_id": assignment["org_id"]})
     if not structure:
         raise HTTPException(status_code=400, detail="Assigned salary structure missing")
     comps = payroll_engine.monthly_components(structure, assignment["gross_monthly"])
@@ -116,7 +117,8 @@ async def put_declarations(input: DeclarationsIn, employee_id: str | None = None
         raise HTTPException(status_code=403, detail="Not your profile")
     existing = await db.tax_declarations.find_one({"org_id": ctx.org_id, "employee_id": emp["id"]})
     if existing:
-        await db.tax_declarations.update_one({"id": existing["id"]}, {"$set": input.model_dump()})
+        await db.tax_declarations.update_one(
+            {"id": existing["id"], "org_id": ctx.org_id}, {"$set": input.model_dump()})
     else:
         await db.tax_declarations.insert_one({
             "id": new_id(), "org_id": ctx.org_id, "employee_id": emp["id"], **input.model_dump(),

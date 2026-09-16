@@ -421,7 +421,7 @@ async def update_saved(saved_id: str, input: SavedReportIn,
                   "updated_at": datetime.now(timezone.utc)}})
     if not res.matched_count:
         raise HTTPException(status_code=404, detail="Saved report not found")
-    return await db.saved_reports.find_one({"id": saved_id}, {"_id": 0})
+    return await db.saved_reports.find_one({"id": saved_id, "org_id": ctx.org_id}, {"_id": 0})
 
 
 @router.post("/saved/{saved_id}/run")

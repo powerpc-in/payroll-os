@@ -28,27 +28,68 @@ def slab_tax(taxable: float, slabs: list[dict[str, Any]]) -> float:
     return tax
 
 
-def _tiered(taxable: float, tiers: list[dict[str, Any]]) -> float:
-    """tiers: [{"above": 5000000, "rate": 0.10}, ...] — the highest matching tier applies."""
-    amount = 0.0
-    for tier in tiers:
+def surcharge_rate_for(taxable: float, tiers: list[dict[str, Any]]) -> tuple[float, float]:
+    """tiers: [{"above": 5000000, "rate": 0.10}, ...] — the highest crossed threshold applies.
+
+    Returns (rate, threshold). Surcharge thresholds are tested against TOTAL INCOME, while
+    the surcharge itself is levied on the TAX. Both come from the rule document.
+    """
+    rate, threshold = 0.0, 0.0
+    for tier in sorted(tiers, key=lambda t: float(t["above"])):
         if taxable > float(tier["above"]):
-            amount = max(amount, taxable * float(tier["rate"]))
-    return amount
+            rate, threshold = float(tier["rate"]), float(tier["above"])
+    return rate, threshold
 
 
-def compute_income_tax(taxable: float, rule_params: dict[str, Any]) -> dict[str, Any]:
-    slabs = rule_params["slabs"]
-    tax = round(slab_tax(taxable, slabs), 2)
-
-    rebate_cfg = rule_params.get("rebate", {})
+def _tax_and_surcharge(taxable: float, rule_params: dict[str, Any]) -> tuple[float, float, float]:
+    """(tax_after_rebate, surcharge_before_marginal_relief, surcharge_rate) at an income level."""
+    tax = slab_tax(taxable, rule_params["slabs"])
+    rebate_cfg = rule_params.get("rebate", {}) or {}
     rebate = 0.0
     if rebate_cfg and taxable <= float(rebate_cfg.get("taxable_limit", 0)):
         rebate = min(tax, float(rebate_cfg.get("max_rebate", 0)))
+    base = max(0.0, tax - rebate)
+    rate, _ = surcharge_rate_for(taxable, rule_params.get("surcharge", []) or [])
+    return base, base * rate, rate
+
+
+def compute_income_tax(taxable: float, rule_params: dict[str, Any]) -> dict[str, Any]:
+    """Slab tax → 87A rebate → surcharge **on the tax** → marginal relief → cess.
+
+    Every rate/threshold/cap comes from the versioned rule document; nothing is hardcoded.
+    Marginal relief caps the (tax + surcharge) increase at the income increase over the
+    surcharge threshold, which is why surcharge must be levied on tax, never on income.
+    """
+    slabs = rule_params["slabs"]
+    tax = round(slab_tax(taxable, slabs), 2)
+
+    rebate_cfg = rule_params.get("rebate", {}) or {}
+    rebate = 0.0
+    rebate_applied_to_limit = float(rebate_cfg.get("taxable_limit", 0)) if rebate_cfg else 0.0
+    if rebate_cfg and taxable <= rebate_applied_to_limit:
+        rebate = min(tax, float(rebate_cfg.get("max_rebate", 0)))
     rebate = round(rebate, 2)
 
-    base = max(0.0, tax - rebate)
-    surcharge = round(_tiered(taxable, rule_params.get("surcharge", [])), 2)
+    base = round(max(0.0, tax - rebate), 2)
+
+    tiers = rule_params.get("surcharge", []) or []
+    rate, threshold = surcharge_rate_for(taxable, tiers)
+    surcharge_raw = round(base * rate, 2)
+
+    # --- Marginal relief on surcharge -------------------------------------------------
+    # Relief = (tax + surcharge at this income) − (tax at the threshold + (income − threshold)).
+    # Applied only when it is positive, i.e. when crossing the threshold would otherwise
+    # cost more in tax than the extra income earned.
+    marginal_relief = 0.0
+    if rate > 0 and threshold > 0:
+        tax_at_threshold, surcharge_at_threshold, _ = _tax_and_surcharge(threshold, rule_params)
+        excess_income = taxable - threshold
+        payable_here = base + surcharge_raw
+        payable_cap = tax_at_threshold + surcharge_at_threshold + excess_income
+        if payable_here > payable_cap:
+            marginal_relief = round(payable_here - payable_cap, 2)
+    surcharge = round(max(0.0, surcharge_raw - marginal_relief), 2)
+
     cess = round((base + surcharge) * float(rule_params.get("cess_rate", 0.0)), 2)
     total = round(base + surcharge + cess, 2)
 
@@ -56,6 +97,10 @@ def compute_income_tax(taxable: float, rule_params: dict[str, Any]) -> dict[str,
         "tax_before_rebate": tax,
         "rebate_87a": rebate,
         "tax_after_rebate": base,
+        "surcharge_rate": rate,
+        "surcharge_threshold": threshold,
+        "surcharge_before_relief": surcharge_raw,
+        "marginal_relief": marginal_relief,
         "surcharge": surcharge,
         "health_education_cess": cess,
         "total_annual_tax": total,

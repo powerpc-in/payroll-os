@@ -36,7 +36,10 @@ class RuleIn(BaseModel):
 async def list_rules(ctx: Context = Depends(require_perm("compliance.view")),
                      jurisdiction: str | None = None, rule_type: str | None = None,
                      state: str | None = None, active: bool | None = None):
-    query: dict = {}
+    # Tenant scoping: platform-wide rules (org_id None) + this tenant's own versions only.
+    # Another tenant's rule documents (and their values/notes) are never returned.
+    query: dict = {"$or": [{"org_id": None}, {"org_id": {"$exists": False}},
+                           {"org_id": ctx.org_id}]}
     if jurisdiction:
         query["jurisdiction"] = jurisdiction
     if rule_type:
@@ -50,15 +53,21 @@ async def list_rules(ctx: Context = Depends(require_perm("compliance.view")),
     for d in docs:
         d.pop("_id", None)
         d["verification_status"] = "verified" if d.get("verified") else "Requires statutory verification"
+        d["scope"] = "organisation" if d.get("org_id") else "platform"
     return docs
 
 
 @router.post("/rules")
 async def add_rule_version(input: RuleIn, ctx: Context = Depends(require_perm("compliance.manage"))):
     """Manually enter a NEW rule version — typically after independently verifying
-    the values offline. The system never marks a rule verified on its own."""
+    the values offline. The system never marks a rule verified on its own.
+
+    The version is owned by the authoring tenant (org_id = ctx.org_id) and is resolved only
+    for that tenant, so one customer's rule entry can never alter another's payroll.
+    """
     last = await db.statutory_rules.find_one(
-        {"jurisdiction": input.jurisdiction, "rule_type": input.rule_type, "state": input.state},
+        {"jurisdiction": input.jurisdiction, "rule_type": input.rule_type, "state": input.state,
+         "$or": [{"org_id": None}, {"org_id": {"$exists": False}}, {"org_id": ctx.org_id}]},
         sort=[("version", -1)])
     doc = input.model_dump()
     doc["id"] = new_id()

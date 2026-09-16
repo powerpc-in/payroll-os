@@ -95,7 +95,8 @@ async def update_structure(structure_id: str, input: StructureIn,
     )
     if not res.matched_count:
         raise HTTPException(status_code=404, detail="Structure not found")
-    return await db.salary_structures.find_one({"id": structure_id}, {"_id": 0})
+    return await db.salary_structures.find_one(
+        {"id": structure_id, "org_id": ctx.org_id}, {"_id": 0})
 
 
 @router.get("/assignments")

@@ -165,7 +165,7 @@ async def _decide(ctx: Context, request_id: str, approve: bool) -> dict:
                 "granted": 0, "used": req["days"], "year": req["from_date"][:4],
             })
 
-    await db.leave_requests.update_one({"id": request_id}, {
+    await db.leave_requests.update_one({"id": request_id, "org_id": ctx.org_id}, {
         "$set": {"status": "approved" if approve else "rejected",
                  "decided_by": ctx.user["email"], "decided_at": now()},
     })

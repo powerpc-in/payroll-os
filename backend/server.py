@@ -17,11 +17,14 @@ load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
 from lib.db import client, db, ensure_indexes
+from lib.security import assert_production_config
 
 
 # Startup runs before the yield, shutdown after it. Add your own setup/teardown here.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail fast (and loudly) rather than serving production traffic with dev fallbacks.
+    assert_production_config()
     app.state.index_task = asyncio.create_task(ensure_indexes())  # background: a big index build must not block boot
     yield
     client.close()
@@ -80,7 +83,9 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    # Credentialed requests cannot use a wildcard origin; production startup refuses a
+    # wildcard outright (lib.security.assert_production_config).
+    allow_origins=[o.strip() for o in os.environ.get('CORS_ORIGINS', '*').split(',') if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -53,7 +53,7 @@ async def dashboard(ctx: Context = Depends(require_perm("dashboards.view"))):
         if not emp_id:
             payload["notice"] = "Your login is not yet linked to an employee record."
             return payload
-        emp = await db.employees.find_one({"id": emp_id}, {"_id": 0})
+        emp = await db.employees.find_one({"id": emp_id, "org_id": ctx.org_id}, {"_id": 0})
         rows = await db.payroll_employees.find(
             {"org_id": org_id, "employee_id": emp_id, "status": "ok"},
             {"_id": 0}).sort("period", -1).to_list(24)

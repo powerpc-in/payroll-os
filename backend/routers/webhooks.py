@@ -94,7 +94,7 @@ async def update_webhook(webhook_id: str, input: WebhookIn,
         raise HTTPException(status_code=404, detail="Webhook not found")
     await emit(ctx.org_id, "webhook.updated", actor=ctx.user, entity="webhook",
                entity_id=webhook_id, summary=f"Webhook '{input.name}' updated")
-    return await db.webhooks.find_one({"id": webhook_id}, {"_id": 0})
+    return await db.webhooks.find_one({"id": webhook_id, "org_id": ctx.org_id}, {"_id": 0})
 
 
 @router.delete("/{webhook_id}")

@@ -47,7 +47,8 @@ async def compute_settlement(org: dict, emp: dict, input_: dict) -> dict:
         {"org_id": org_id, "employee_id": emp["id"], "active": True})
     if not assignment:
         raise ValueError("No active salary assignment — assign a salary structure first")
-    structure = await db.salary_structures.find_one({"id": assignment["structure_id"]})
+    structure = await db.salary_structures.find_one(
+        {"id": assignment["structure_id"], "org_id": org_id})
     gross_monthly = float(assignment["gross_monthly"])
     comps = payroll_engine.monthly_components(structure, gross_monthly)
     basic_monthly = float(next((c["monthly"] for c in comps if c["code"] == "BASIC"), 0.0))

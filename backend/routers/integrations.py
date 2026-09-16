@@ -134,7 +134,7 @@ async def upsert_mapping(connection_id: str, input: MappingIn,
         raise HTTPException(status_code=404, detail="Connection not found")
     mappings = [m for m in conn.get("mappings", []) if m["object"] != input.object]
     mappings.append(input.model_dump())
-    await db.integration_connections.update_one({"id": connection_id},
+    await db.integration_connections.update_one({"id": connection_id, "org_id": ctx.org_id},
                                                 {"$set": {"mappings": mappings}})
     return {"ok": True, "mappings": mappings}
 
@@ -181,7 +181,7 @@ async def test_connection(connection_id: str, ctx: Context = Depends(require_per
         result, message = False, f"Connection attempt failed: {str(exc)[:200]}"
 
     status = "connected" if result else conn["status"]
-    await db.integration_connections.update_one({"id": connection_id},
+    await db.integration_connections.update_one({"id": connection_id, "org_id": ctx.org_id},
                                                 {"$set": {"status": status, "last_tested_at": now()}})
     await db.sync_logs.insert_one({
         "id": new_id(), "org_id": ctx.org_id, "connection_id": connection_id,

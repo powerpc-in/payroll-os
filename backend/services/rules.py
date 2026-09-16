@@ -43,15 +43,22 @@ async def find_rules(
         "rule_type": rule_type,
         "active": True,
         "effective_from": {"$lte": on},
-        "$or": [{"effective_to": None}, {"effective_to": {"$gte": on}}],
+        # Tenant scoping: platform-wide rules (org_id None) plus this tenant's own overrides.
+        # A rule authored by one tenant must never influence another tenant's payroll.
+        "$and": [
+            {"$or": [{"effective_to": None}, {"effective_to": {"$gte": on}}]},
+            {"$or": [{"org_id": None}, {"org_id": {"$exists": False}}, {"org_id": org_id}]},
+        ],
     }
     if state:
         query["state"] = {"$in": [None, state]}
     else:
         query["state"] = None
     docs = await db.statutory_rules.find(query).sort("version", -1).to_list(50)
-    if state:
-        docs.sort(key=lambda d: 0 if d.get("state") == state else 1)  # state-specific wins
+    # Tenant-specific overrides win over platform rules; state-specific wins over national.
+    docs.sort(key=lambda d: (0 if d.get("org_id") == org_id else 1,
+                             0 if (state and d.get("state") == state) else 1,
+                             -int(d.get("version") or 0)))
     return docs
 
 

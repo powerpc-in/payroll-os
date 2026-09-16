@@ -166,7 +166,8 @@ async def get_employee(employee_id: str, ctx: Context = Depends(require_perm("em
     structures = {}
     for a in assignments:
         if a["structure_id"] not in structures:
-            s = await db.salary_structures.find_one({"id": a["structure_id"]}, {"_id": 0})
+            s = await db.salary_structures.find_one(
+                {"id": a["structure_id"], "org_id": ctx.org_id}, {"_id": 0})
             if s:
                 structures[a["structure_id"]] = s
     return {"employee": mask(doc, reveal and ctx.can("employees.view_sensitive")),
@@ -183,7 +184,7 @@ async def update_employee(employee_id: str, input: EmployeeIn,
     updates["department_id"] = await _resolve_department(ctx.org_id, input.department_name)
     changed = {k: v for k, v in updates.items() if old.get(k) != v}
     if changed:
-        await db.employees.update_one({"id": employee_id}, {"$set": changed})
+        await db.employees.update_one({"id": employee_id, "org_id": ctx.org_id}, {"$set": changed})
         await emit(ctx.org_id, "employee.updated", actor=ctx.user, entity="employee",
                    entity_id=employee_id, old={k: old.get(k) for k in changed}, new=changed,
                    summary=f"Employee {old['name']} updated ({', '.join(list(changed)[:5])})")
@@ -196,8 +197,9 @@ async def delete_employee(employee_id: str, ctx: Context = Depends(require_perm(
     old = await db.employees.find_one({"id": employee_id, "org_id": ctx.org_id})
     if not old:
         raise HTTPException(status_code=404, detail="Employee not found")
-    await db.employees.delete_one({"id": employee_id})
-    await db.salary_assignments.update_many({"employee_id": employee_id}, {"$set": {"active": False}})
+    await db.employees.delete_one({"id": employee_id, "org_id": ctx.org_id})
+    await db.salary_assignments.update_many(
+        {"employee_id": employee_id, "org_id": ctx.org_id}, {"$set": {"active": False}})
     await emit(ctx.org_id, "employee.terminated", actor=ctx.user, entity="employee",
                entity_id=employee_id, old={"name": old["name"]},
                summary=f"Employee {old['name']} deleted")
@@ -215,7 +217,7 @@ async def exit_employee(employee_id: str, input: ExitIn,
     old = await db.employees.find_one({"id": employee_id, "org_id": ctx.org_id})
     if not old:
         raise HTTPException(status_code=404, detail="Employee not found")
-    await db.employees.update_one({"id": employee_id}, {
+    await db.employees.update_one({"id": employee_id, "org_id": ctx.org_id}, {
         "$set": {"status": "exited", "exit_date": input.exit_date, "exit_reason": input.exit_reason},
     })
     await emit(ctx.org_id, "employee.terminated", actor=ctx.user, entity="employee",

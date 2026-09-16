@@ -8,6 +8,8 @@ from pydantic import BaseModel, EmailStr, Field
 
 from lib.auth import (Context, clear_session_cookie, create_session_token, get_ctx,
                       hash_password, new_id, set_session_cookie, verify_password)
+from lib.security import (check_login_allowed, clear_login_failures, is_production_reset_policy,
+                          record_login_failure)
 from lib.db import db
 from lib.events import emit
 from lib.rbac import permissions_for_role
@@ -89,12 +91,17 @@ async def signup(input: SignupIn, response: Response):
 
 @router.post("/login")
 async def login(input: LoginIn, response: Response):
-    user = await db.users.find_one({"email": input.email.lower()})
+    email = input.email.lower()
+    await check_login_allowed(email)
+    user = await db.users.find_one({"email": email})
     if not user or not verify_password(input.password, user.get("password_hash", "")):
+        # Generic message: never reveal whether the account exists.
+        await record_login_failure(email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     memberships = user.get("memberships", [])
     if not memberships:
         raise HTTPException(status_code=403, detail="No organisation membership")
+    await clear_login_failures(email)
     org_id = memberships[0]["org_id"]
     set_session_cookie(response, create_session_token(user["id"], org_id))
     return await session_payload(Context(user=user, org_id=org_id, role=memberships[0]["role"]))
@@ -119,23 +126,35 @@ async def password_reset_request(input: ResetRequestIn):
         return {"ok": True, "reset_token": None}
     token = os.urandom(24).hex()
     await db.users.update_one({"id": user["id"]}, {
-        "$set": {"reset_token": token, "reset_token_expires": now() + timedelta(hours=1)},
+        "$set": {"reset_token": hash_password(token),
+                 "reset_token_expires": now() + timedelta(hours=1)},
     })
-    # MVP: no email provider configured — the token is returned so the flow is testable.
-    # Production deployments should deliver this token over email instead.
+    if is_production_reset_policy():
+        # Production: the token is never returned over the API. It must be delivered out of
+        # band (email provider not configured in this MVP), so the flow stops here.
+        return {
+            "ok": True, "reset_token": None,
+            "note": "If the account exists, a reset link will be sent. No email provider is "
+                    "configured in this build, so an administrator must reset the password.",
+        }
     return {
         "ok": True, "reset_token": token,
-        "note": "Email delivery is not configured in this MVP — the token is returned here for testing.",
+        "note": "DEVELOPMENT ONLY — the token is returned here for testing. With "
+                "APP_ENV=production it is never included in the response.",
     }
 
 
 @router.post("/password-reset/confirm")
 async def password_reset_confirm(input: ResetConfirmIn):
-    user = await db.users.find_one({"reset_token": input.token, "reset_token_expires": {"$gte": now()}})
+    # Tokens are stored hashed, so candidates are matched by verifying the hash.
+    candidates = await db.users.find({"reset_token": {"$ne": None},
+                                      "reset_token_expires": {"$gte": now()}}).to_list(200)
+    user = next((u for u in candidates if verify_password(input.token, u.get("reset_token") or "")), None)
     if not user:
         raise HTTPException(status_code=400, detail="Reset token is invalid or expired")
     await db.users.update_one({"id": user["id"]}, {
         "$set": {"password_hash": hash_password(input.new_password)},
         "$unset": {"reset_token": "", "reset_token_expires": ""},
     })
+    await clear_login_failures(user["email"])
     return {"ok": True}

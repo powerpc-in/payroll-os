@@ -145,10 +145,19 @@ def compute_employee_payroll(
         rule_refs.append(rule_ref(pf_rule))
         p = pf_rule["params"]
         ee_rate, er_rate = float(p["employee_rate"]), float(p["employer_rate"])
+        ceiling = p.get("wage_ceiling")
+        # A statutory wage ceiling (when the rule version defines one) caps the contribution
+        # wage and is pro-rated for part-month pay, UNLESS the employee has opted to
+        # contribute on higher wages. Both behaviours come from the rule + employee record —
+        # the engine never invents a ceiling.
+        higher_wages = bool(employee.get("pf_on_higher_wages", False))
+        capped_wage = _r2(float(ceiling) * factor) if ceiling else None
+        if capped_wage is not None and not higher_wages:
+            pf_wage = _r2(min(pf_wage, capped_wage))
         ee_pf = _r2(pf_wage * ee_rate)
         er_pf = _r2(pf_wage * er_rate)
-        ceiling = p.get("wage_ceiling")
-        eps_wage = min(pf_wage, float(ceiling)) if ceiling else pf_wage
+        # EPS remains capped at the statutory ceiling even when contributing on higher wages.
+        eps_wage = _r2(min(pf_wage, capped_wage)) if capped_wage is not None else pf_wage
         eps = _r2(eps_wage * float(p["eps_rate"]))
         deductions.append({
             "code": "PF", "name": "Provident Fund (employee)", "category": "deduction",
@@ -185,9 +194,14 @@ def compute_employee_payroll(
         })
 
     # ---- statutory: ESI -------------------------------------------------------
+    # Eligibility is tested on the FULL-MONTH wage, not the LOP-reduced gross: a covered
+    # employee does not fall out of ESI for a month merely because of unpaid leave. Once
+    # covered, the contribution is computed on wages actually paid.
     esi_rule = rules.get("esi")
     esi_gross_limit = float(esi_rule["params"]["gross_limit"]) if esi_rule else 0
-    if employee.get("esi_applicable") and esi_rule is not None and gross_earnings <= esi_gross_limit:
+    esi_eligibility_wage = _r2(max(gross_earnings, gross_monthly))
+    if employee.get("esi_applicable") and esi_rule is not None \
+            and esi_eligibility_wage <= esi_gross_limit:
         rule_refs.append(rule_ref(esi_rule))
         p = esi_rule["params"]
         ee_esi = _r2(gross_earnings * float(p["employee_rate"]))
@@ -195,7 +209,8 @@ def compute_employee_payroll(
         deductions.append({
             "code": "ESI", "name": "ESI (employee)", "category": "deduction", "amount": ee_esi,
             "explanation": {
-                "input": f"Gross ₹{gross_earnings:,.2f} ≤ threshold ₹{esi_gross_limit:,.0f}",
+                "input": f"Full-month wage ₹{esi_eligibility_wage:,.2f} ≤ threshold "
+                         f"₹{esi_gross_limit:,.0f} · contribution on paid wages ₹{gross_earnings:,.2f}",
                 "rule": f"{esi_rule.get('source', 'ESI rules')} v{esi_rule.get('version')}"
                         + ("" if esi_rule.get("verified") else " · requires statutory verification"),
                 "formula": f"Employee {pct(float(p['employee_rate']))} of gross",
@@ -233,31 +248,47 @@ def compute_employee_payroll(
             })
     lwf_rule = rules.get("lwf")
     if lwf_rule is not None:
-        rule_refs.append(rule_ref(lwf_rule))
         p = lwf_rule["params"]
-        ee_lwf = _r2(float(p["employee"]))
-        er_lwf = _r2(float(p["employer"]))
-        deductions.append({
-            "code": "LWF", "name": f"Labour Welfare Fund ({state or 'state'})", "category": "deduction",
-            "amount": ee_lwf,
-            "explanation": {
-                "input": f"State {state} · monthly contribution",
-                "rule": f"{lwf_rule.get('source', 'LWF rules')} v{lwf_rule.get('version')}"
-                        + ("" if lwf_rule.get("verified") else " · requires statutory verification"),
-                "formula": f"Employee ₹{ee_lwf:,.0f} / month",
-                "calculation": f"Flat ₹{ee_lwf:,.2f}",
-            },
-        })
-        employer_contributions.append({
-            "code": "LWF_ER", "name": f"LWF employer share ({state or 'state'})", "category": "employer_contribution",
-            "amount": er_lwf,
-            "explanation": {
-                "input": f"State {state} · monthly contribution",
-                "rule": f"{lwf_rule.get('source', 'LWF rules')} v{lwf_rule.get('version')}",
-                "formula": f"Employer ₹{er_lwf:,.0f} / month",
-                "calculation": f"Flat ₹{er_lwf:,.2f}",
-            },
-        })
+        # LWF is periodic in most states (monthly / half-yearly / annual). The deduction
+        # month(s) come from the rule version (`frequency` + `deduction_months`); when the
+        # rule version does not specify them, the existing monthly behaviour is preserved
+        # and the explanation says so rather than assuming a schedule.
+        frequency = str(p.get("frequency") or "monthly").lower()
+        deduction_months = p.get("deduction_months")
+        period_month = int(period.split("-")[1])
+        due_this_month = True
+        if deduction_months:
+            due_this_month = period_month in [int(m) for m in deduction_months]
+        if due_this_month:
+            rule_refs.append(rule_ref(lwf_rule))
+            schedule_note = (f"{frequency} contribution"
+                             + (f", deducted in month(s) {sorted(int(m) for m in deduction_months)}"
+                                if deduction_months
+                                else " (no deduction schedule in this rule version — deducted monthly)"))
+            ee_lwf = _r2(float(p["employee"]))
+            er_lwf = _r2(float(p["employer"]))
+            deductions.append({
+                "code": "LWF", "name": f"Labour Welfare Fund ({state or 'state'})", "category": "deduction",
+                "amount": ee_lwf,
+                "explanation": {
+                    "input": f"State {state} · {schedule_note}",
+                    "rule": f"{lwf_rule.get('source', 'LWF rules')} v{lwf_rule.get('version')}"
+                            + ("" if lwf_rule.get("verified") else " · requires statutory verification"),
+                    "formula": f"Employee ₹{ee_lwf:,.2f} per {frequency} period",
+                    "calculation": f"Flat ₹{ee_lwf:,.2f}",
+                },
+            })
+            employer_contributions.append({
+                "code": "LWF_ER", "name": f"LWF employer share ({state or 'state'})",
+                "category": "employer_contribution", "amount": er_lwf,
+                "explanation": {
+                    "input": f"State {state} · {schedule_note}",
+                    "rule": f"{lwf_rule.get('source', 'LWF rules')} v{lwf_rule.get('version')}"
+                            + ("" if lwf_rule.get("verified") else " · requires statutory verification"),
+                    "formula": f"Employer ₹{er_lwf:,.2f} per {frequency} period",
+                    "calculation": f"Flat ₹{er_lwf:,.2f}",
+                },
+            })
 
     # ---- statutory: TDS (regime chosen by employee, rules versioned) ----------
     from services import tax_engine

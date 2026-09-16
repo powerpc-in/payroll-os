@@ -21,8 +21,34 @@ COOKIE_NAME = "session"
 SESSION_TTL_HOURS = 24 * 14
 
 
+def app_env() -> str:
+    return (os.environ.get("APP_ENV") or "development").strip().lower()
+
+
+def is_production() -> bool:
+    return app_env() in ("production", "prod")
+
+
+DEV_FALLBACK_SECRET = "dev-only-insecure-secret"
+
+
 def _secret() -> str:
-    return os.environ.get("SESSION_SECRET", "dev-only-insecure-secret")
+    """Never silently fall back to a dev secret in production.
+
+    In production a missing/short/known-default SESSION_SECRET is a hard failure (checked at
+    startup by lib.security.assert_production_config and again here) rather than an
+    invisible downgrade to a guessable signing key.
+    """
+    secret = os.environ.get("SESSION_SECRET")
+    if is_production():
+        if not secret or secret == DEV_FALLBACK_SECRET or len(secret) < 32:
+            raise HTTPException(
+                status_code=500,
+                detail="Server misconfigured: SESSION_SECRET is missing or insecure. "
+                       "Refusing to sign sessions with a development fallback.",
+            )
+        return secret
+    return secret or DEV_FALLBACK_SECRET
 
 
 def hash_password(plain: str) -> str:
@@ -50,9 +76,10 @@ def create_session_token(user_id: str, org_id: str) -> str:
 
 
 def set_session_cookie(response: Response, token: str) -> None:
+    # Secure is required in production (HTTPS-only); dev keeps it off for http://localhost.
     response.set_cookie(
         COOKIE_NAME, token, max_age=SESSION_TTL_HOURS * 3600,
-        httponly=True, samesite="lax",
+        httponly=True, samesite="lax", secure=is_production(), path="/",
     )
 
 

@@ -90,7 +90,7 @@ async def calculate(run_id: str, ctx: Context = Depends(require_perm("payroll.ca
     if not run:
         raise HTTPException(status_code=404, detail="Payroll run not found")
     try:
-        updated = await payroll_service.calculate_run(run_id, ctx.user)
+        updated = await payroll_service.calculate_run(run_id, ctx.user, ctx.org_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     await emit(ctx.org_id, "payroll.calculated", actor=ctx.user, entity="payroll_run",
@@ -210,7 +210,7 @@ async def lock(run_id: str, ctx: Context = Depends(require_perm("payroll.lock"))
         if new_outstanding <= 0.01:
             updates["status"] = "closed"
             updates["closed_at"] = now()
-        await db.loans.update_one({"id": loan["id"]}, {"$set": updates})
+        await db.loans.update_one({"id": loan["id"], "org_id": ctx.org_id}, {"$set": updates})
     await db.payroll_runs.update_one({"id": run_id}, {"$set": {"payslips_generated": True}})
 
     # Payslip-ready alert: one event per employee whose login is linked to their record.

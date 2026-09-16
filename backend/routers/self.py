@@ -112,7 +112,8 @@ async def save_tax_declarations(input: dict, ctx: Context = Depends(get_ctx)):
                for k in ("deduction_80c", "deduction_80d", "annual_rent_paid", "metro", "other_income")}
     existing = await db.tax_declarations.find_one({"org_id": ctx.org_id, "employee_id": emp["id"]})
     if existing:
-        await db.tax_declarations.update_one({"id": existing["id"]}, {"$set": allowed})
+        await db.tax_declarations.update_one(
+            {"id": existing["id"], "org_id": ctx.org_id}, {"$set": allowed})
     else:
         await db.tax_declarations.insert_one({
             "id": new_id(), "org_id": ctx.org_id, "employee_id": emp["id"], **allowed,

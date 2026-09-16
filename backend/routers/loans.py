@@ -112,7 +112,7 @@ async def close_loan(loan_id: str, input: CloseIn, ctx: Context = Depends(requir
         raise HTTPException(status_code=404, detail="Loan not found")
     if doc["status"] != "active":
         raise HTTPException(status_code=409, detail=f"Loan already {doc['status']}")
-    await db.loans.update_one({"id": loan_id}, {
+    await db.loans.update_one({"id": loan_id, "org_id": ctx.org_id}, {
         "$set": {"status": "closed", "closed_at": now(), "close_note": input.note},
     })
     await emit(ctx.org_id, "loan.closed", actor=ctx.user, entity="loan", entity_id=loan_id,

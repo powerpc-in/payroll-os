@@ -101,8 +101,11 @@ async def create_run(org: dict, period: str, actor: dict) -> dict:
     return run
 
 
-async def calculate_run(run_id: str, actor: dict) -> dict:
-    run = await db.payroll_runs.find_one({"id": run_id})
+async def calculate_run(run_id: str, actor: dict, org_id: str | None = None) -> dict:
+    # org_id is passed by the router (already permission-checked) so the service can never
+    # be driven to operate on another tenant's run by id alone.
+    query = {"id": run_id} if org_id is None else {"id": run_id, "org_id": org_id}
+    run = await db.payroll_runs.find_one(query)
     if not run:
         raise ValueError("Payroll run not found")
     if run["status"] not in ("draft", "calculated"):
