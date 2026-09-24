@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from lib.auth import Context, new_id, require_perm
 from lib.db import db
 from lib.events import emit
+from lib.team_scope import manager_team_ids
 
 router = APIRouter(prefix="/v1", tags=["Attendance"])
 
@@ -34,7 +35,12 @@ class ImportIn(BaseModel):
 async def list_attendance(ctx: Context = Depends(require_perm("attendance.view")),
                           employee_id: str | None = None, period: str | None = None):
     query: dict = {"org_id": ctx.org_id}
-    if employee_id:
+    if ctx.role == "MANAGER":
+        team_ids = await manager_team_ids(ctx)
+        query["employee_id"] = employee_id if employee_id in team_ids else {"$in": team_ids}
+        if employee_id and employee_id not in team_ids:
+            query["employee_id"] = {"$in": []}
+    elif employee_id:
         query["employee_id"] = employee_id
     if period:
         query["period"] = period
@@ -110,7 +116,10 @@ async def import_attendance(input: ImportIn, ctx: Context = Depends(require_perm
 
 @router.get("/attendance/summary")
 async def attendance_summary(period: str, ctx: Context = Depends(require_perm("attendance.view"))):
-    docs = await db.attendance.find({"org_id": ctx.org_id, "period": period}).to_list(20000)
+    query = {"org_id": ctx.org_id, "period": period}
+    if ctx.role == "MANAGER":
+        query["employee_id"] = {"$in": await manager_team_ids(ctx)}
+    docs = await db.attendance.find(query).to_list(20000)
     by_emp: dict[str, dict] = {}
     for d in docs:
         entry = by_emp.setdefault(d["employee_id"], {

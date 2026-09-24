@@ -50,7 +50,13 @@ async def find_rules(
             {"$or": [{"org_id": None}, {"org_id": {"$exists": False}}, {"org_id": org_id}]},
         ],
     }
-    if state:
+    if rule_type in ("professional_tax", "lwf") and not state:
+        # A missing employee state cannot identify the applicable state levy.
+        query["state"] = {"$in": []}
+    elif state and rule_type in ("professional_tax", "lwf"):
+        # PT and LWF are state levies; never fall back to a state-neutral document.
+        query["state"] = state
+    elif state:
         query["state"] = {"$in": [None, state]}
     else:
         query["state"] = None

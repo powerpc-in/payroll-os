@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from lib.auth import Context, new_id, require_perm
 from lib.db import db
 from lib.events import emit
+from lib.team_scope import manager_team_ids, require_manager_team_member
 
 router = APIRouter(prefix="/v1/leave", tags=["Leave"])
 
@@ -64,6 +65,8 @@ async def balances(ctx: Context = Depends(require_perm("leave.view")), employee_
             return []
     elif not employee_id:
         raise HTTPException(status_code=422, detail="employee_id is required")
+    elif ctx.role == "MANAGER":
+        await require_manager_team_member(ctx, employee_id)
     docs = await db.leave_balances.find({"org_id": ctx.org_id, "employee_id": employee_id}).to_list(50)
     for d in docs:
         d.pop("_id", None)
@@ -76,6 +79,11 @@ async def list_requests(ctx: Context = Depends(require_perm("leave.view")),
     query: dict = {"org_id": ctx.org_id}
     if ctx.role == "EMPLOYEE":
         query["employee_id"] = ctx.user.get("employee_id") or "__none__"
+    elif ctx.role == "MANAGER":
+        team_ids = await manager_team_ids(ctx)
+        query["employee_id"] = employee_id if employee_id in team_ids else {"$in": team_ids}
+        if employee_id and employee_id not in team_ids:
+            query["employee_id"] = {"$in": []}
     elif employee_id:
         query["employee_id"] = employee_id
     if status:
@@ -99,6 +107,8 @@ async def create_request(input: LeaveRequestIn, ctx: Context = Depends(require_p
     emp = await db.employees.find_one({"id": employee_id, "org_id": ctx.org_id})
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found in this organisation")
+    if ctx.role == "MANAGER":
+        await require_manager_team_member(ctx, employee_id)
     lt = await db.leave_types.find_one({"id": input.leave_type_id, "org_id": ctx.org_id})
     if not lt:
         raise HTTPException(status_code=404, detail="Leave type not found")

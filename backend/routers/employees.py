@@ -8,7 +8,11 @@ from pydantic import BaseModel
 from lib.auth import Context, new_id, require_perm
 from lib.db import db
 from lib.events import emit
+from lib.team_scope import manager_team_ids, require_manager_team_member
 from services.payroll_engine import mask_account, mask_pan
+from services.statutory_profile_models import EmploymentStatutoryProfileIn
+from services.employment_statutory_profiles import insert_profile, validate_org_references
+from services.tax_year_profiles import TaxYearProfileIn, upsert_tax_profile
 
 router = APIRouter(prefix="/v1", tags=["Employees"])
 
@@ -80,6 +84,8 @@ class EmployeeIn(BaseModel):
     bank_account: str | None = None
     ifsc: str | None = None
     account_holder: str | None = None
+    statutory_profile: EmploymentStatutoryProfileIn | None = None
+    tax_year_profile: TaxYearProfileIn | None = None
     emergency_contact_name: str | None = None
     emergency_contact_phone: str | None = None
 
@@ -106,8 +112,7 @@ async def list_employees(
 ):
     query: dict = {"org_id": ctx.org_id}
     if ctx.role == "MANAGER":
-        me_emp = await db.employees.find_one({"org_id": ctx.org_id, "user_id": ctx.user_id})
-        query["reporting_manager_id"] = me_emp["id"] if me_emp else "__none__"
+        query["id"] = {"$in": await manager_team_ids(ctx)}
     elif manager_id:
         query["reporting_manager_id"] = manager_id
     if q:
@@ -127,32 +132,53 @@ async def list_employees(
     docs = await db.employees.find(query).sort("created_at", -1) \
         .skip((page - 1) * limit).limit(limit).to_list(limit + 1)
     emp_ids = [d["id"] for d in docs]
-    assignments = await db.salary_assignments.find(
-        {"org_id": ctx.org_id, "active": True, "employee_id": {"$in": emp_ids}}).to_list(len(emp_ids) + 1)
-    gross_by_emp = {a["employee_id"]: a["gross_monthly"] for a in assignments}
+    gross_by_emp = {}
+    if ctx.can("salary.view"):
+        assignments = await db.salary_assignments.find(
+            {"org_id": ctx.org_id, "active": True, "employee_id": {"$in": emp_ids}}).to_list(len(emp_ids) + 1)
+        gross_by_emp = {a["employee_id"]: a["gross_monthly"] for a in assignments}
     items = []
     for d in docs:
         d.pop("_id", None)
-        d["gross_monthly"] = gross_by_emp.get(d["id"])
+        if ctx.can("salary.view"):
+            d["gross_monthly"] = gross_by_emp.get(d["id"])
         items.append(mask(d, reveal and ctx.can("employees.view_sensitive")))
     return {"items": items, "total": total, "page": page, "limit": limit}
 
 
 @router.post("/employees")
 async def create_employee(input: EmployeeIn, ctx: Context = Depends(require_perm("employees.create"))):
+    if input.statutory_profile and not ctx.can("compliance.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: compliance.manage")
+    if input.tax_year_profile and not ctx.can("tax.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: tax.manage")
+    if input.statutory_profile:
+        await validate_org_references(ctx.org_id, input.statutory_profile.work_location_id,
+                                      input.statutory_profile.establishment_id)
     seq = await db.employees.count_documents({"org_id": ctx.org_id})
     dept_id = await _resolve_department(ctx.org_id, input.department_name)
-    doc = input.model_dump()
+    doc = input.model_dump(exclude={"statutory_profile", "tax_year_profile"})
     doc.update({
         "id": new_id(), "org_id": ctx.org_id, "employee_code": f"EMP-{seq + 1:04d}",
         "department_id": dept_id, "user_id": None, "created_at": now(),
     })
     await db.employees.insert_one(doc)
+    profile_doc = None
+    if input.statutory_profile:
+        profile_doc = await insert_profile(ctx.org_id, doc["id"], input.statutory_profile)
+    tax_profile_doc = None
+    if input.tax_year_profile:
+        tax_profile_doc = await upsert_tax_profile(ctx.org_id, doc["id"], input.tax_year_profile, ctx.user)
     doc.pop("_id", None)
     await emit(ctx.org_id, "employee.created", actor=ctx.user, entity="employee", entity_id=doc["id"],
                summary=f"Employee {input.name} ({doc['employee_code']}) created",
                data={"employee_id": doc["id"], "name": input.name})
-    return mask(doc, False)
+    response = mask(doc, False)
+    if profile_doc and ctx.can("compliance.view"):
+        response["statutory_profile"] = profile_doc
+    if tax_profile_doc and ctx.can("tax.view"):
+        response["tax_year_profile"] = {k: v for k, v in tax_profile_doc.items() if k != "org_id"}
+    return response
 
 
 @router.get("/employees/{employee_id}")
@@ -161,26 +187,47 @@ async def get_employee(employee_id: str, ctx: Context = Depends(require_perm("em
     doc = await db.employees.find_one({"id": employee_id, "org_id": ctx.org_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Employee not found")
-    assignments = await db.salary_assignments.find(
-        {"employee_id": employee_id, "org_id": ctx.org_id}, {"_id": 0}).sort("created_at", -1).to_list(10)
+    if ctx.role == "MANAGER":
+        await require_manager_team_member(ctx, employee_id)
+    assignments = []
     structures = {}
-    for a in assignments:
-        if a["structure_id"] not in structures:
-            s = await db.salary_structures.find_one(
-                {"id": a["structure_id"], "org_id": ctx.org_id}, {"_id": 0})
-            if s:
-                structures[a["structure_id"]] = s
-    return {"employee": mask(doc, reveal and ctx.can("employees.view_sensitive")),
-            "assignments": assignments, "structures": list(structures.values())}
+    if ctx.can("salary.view"):
+        assignments = await db.salary_assignments.find(
+            {"employee_id": employee_id, "org_id": ctx.org_id}, {"_id": 0}).sort("created_at", -1).to_list(10)
+        for a in assignments:
+            if a["structure_id"] not in structures:
+                s = await db.salary_structures.find_one(
+                    {"id": a["structure_id"], "org_id": ctx.org_id}, {"_id": 0})
+                if s:
+                    structures[a["structure_id"]] = s
+    response = {"employee": mask(doc, reveal and ctx.can("employees.view_sensitive")),
+                "assignments": assignments, "structures": list(structures.values())}
+    profile_collection = getattr(db, "employment_statutory_profiles", None)
+    if ctx.can("compliance.view") and profile_collection is not None:
+        response["statutory_profiles"] = await profile_collection.find(
+            {"org_id": ctx.org_id, "employee_id": employee_id}, {"_id": 0}
+        ).sort([("effective_from", 1), ("created_at", 1), ("id", 1)]).to_list(500)
+    if ctx.can("tax.view") and getattr(db, "tax_year_profiles", None) is not None:
+        response["tax_year_profiles"] = await db.tax_year_profiles.find(
+            {"org_id": ctx.org_id, "employee_id": employee_id}, {"_id": 0, "org_id": 0}
+        ).sort([("financial_year", 1), ("updated_at", 1), ("id", 1)]).to_list(100)
+    return response
 
 
 @router.put("/employees/{employee_id}")
 async def update_employee(employee_id: str, input: EmployeeIn,
                           ctx: Context = Depends(require_perm("employees.edit"))):
+    if input.statutory_profile and not ctx.can("compliance.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: compliance.manage")
+    if input.tax_year_profile and not ctx.can("tax.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: tax.manage")
+    if input.statutory_profile:
+        await validate_org_references(ctx.org_id, input.statutory_profile.work_location_id,
+                                      input.statutory_profile.establishment_id)
     old = await db.employees.find_one({"id": employee_id, "org_id": ctx.org_id})
     if not old:
         raise HTTPException(status_code=404, detail="Employee not found")
-    updates = input.model_dump()
+    updates = input.model_dump(exclude={"statutory_profile", "tax_year_profile"})
     updates["department_id"] = await _resolve_department(ctx.org_id, input.department_name)
     changed = {k: v for k, v in updates.items() if old.get(k) != v}
     if changed:
@@ -188,8 +235,19 @@ async def update_employee(employee_id: str, input: EmployeeIn,
         await emit(ctx.org_id, "employee.updated", actor=ctx.user, entity="employee",
                    entity_id=employee_id, old={k: old.get(k) for k in changed}, new=changed,
                    summary=f"Employee {old['name']} updated ({', '.join(list(changed)[:5])})")
+    profile_doc = None
+    if input.statutory_profile:
+        profile_doc = await insert_profile(ctx.org_id, employee_id, input.statutory_profile)
+    tax_profile_doc = None
+    if input.tax_year_profile:
+        tax_profile_doc = await upsert_tax_profile(ctx.org_id, employee_id, input.tax_year_profile, ctx.user)
     doc = await db.employees.find_one({"id": employee_id, "org_id": ctx.org_id}, {"_id": 0})
-    return mask(doc, False)
+    response = mask(doc, False)
+    if profile_doc and ctx.can("compliance.view"):
+        response["statutory_profile"] = profile_doc
+    if tax_profile_doc and ctx.can("tax.view"):
+        response["tax_year_profile"] = {k: v for k, v in tax_profile_doc.items() if k != "org_id"}
+    return response
 
 
 @router.delete("/employees/{employee_id}")

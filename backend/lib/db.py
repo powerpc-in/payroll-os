@@ -41,6 +41,16 @@ INDEXES: dict[str, list[IndexModel]] = {
     "salary_components": [_uid(), IndexModel([("org_id", ASCENDING), ("code", ASCENDING)], name="org_code", unique=True)],
     "departments": [_uid(), IndexModel([("org_id", ASCENDING), ("name", ASCENDING)], name="org_name")],
     "locations": [_uid(), IndexModel([("org_id", ASCENDING), ("name", ASCENDING)], name="org_name")],
+    "statutory_establishments": [
+        _uid(), IndexModel([("org_id", ASCENDING), ("name", ASCENDING)], name="org_name"),
+        IndexModel([("org_id", ASCENDING), ("location_id", ASCENDING)], name="org_location"),
+    ],
+    "employment_statutory_profiles": [
+        _uid(),
+        IndexModel([("org_id", ASCENDING), ("employee_id", ASCENDING), ("effective_from", DESCENDING)],
+                   name="org_employee_effective"),
+        IndexModel([("org_id", ASCENDING), ("work_location_id", ASCENDING)], name="org_location"),
+    ],
     "designations": [_uid(), IndexModel([("org_id", ASCENDING), ("name", ASCENDING)], name="org_name")],
     "cost_centres": [_uid(), IndexModel([("org_id", ASCENDING), ("name", ASCENDING)], name="org_name")],
     "payroll_runs": [_uid(), IndexModel([("org_id", ASCENDING), ("period", ASCENDING)], name="org_period", unique=True)],
@@ -84,6 +94,14 @@ INDEXES: dict[str, list[IndexModel]] = {
     "sync_jobs": [_uid(), IndexModel([("org_id", ASCENDING), ("connection_id", ASCENDING)], name="org_conn")],
     "sync_logs": [_uid(), IndexModel([("connection_id", ASCENDING), ("created_at", DESCENDING)], name="conn_created")],
     "tax_declarations": [_uid(), IndexModel([("org_id", ASCENDING), ("employee_id", ASCENDING)], name="org_emp", unique=True)],
+    "tax_year_profiles": [
+        _uid(), IndexModel([("org_id", ASCENDING), ("employee_id", ASCENDING),
+                            ("financial_year", ASCENDING)], name="org_emp_fy", unique=True),
+    ],
+    "tax_year_declarations": [
+        _uid(), IndexModel([("org_id", ASCENDING), ("employee_id", ASCENDING),
+                            ("financial_year", ASCENDING)], name="org_emp_fy", unique=True),
+    ],
     "saved_reports": [_uid(), IndexModel([("org_id", ASCENDING)], name="org")],
 }
 

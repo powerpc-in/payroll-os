@@ -4,6 +4,7 @@ in the UI: the frontend renders whatever this engine defines."""
 
 import csv
 import io
+from copy import deepcopy
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -110,6 +111,37 @@ DATASETS: dict[str, dict] = {
                          _f("from_date", "From"), _f("to_date", "To"),
                          _f("days", "Days", True), _f("paid", "Paid"), _f("status", "Status")]},
 }
+
+# These values reveal employee pay, statutory deductions, or employer payroll cost.
+COMPENSATION_FIELDS = {
+    "gross_earnings", "total_deductions", "net_pay", "employer_cost", "taxable_gross",
+    "tds_amount", "pf_employee", "pf_employer", "esi_employee", "esi_employer",
+    "pt_amount", "lwf_amount", "total_employer_contributions", "amount",
+    "gross_monthly", "annual_ctc",
+}
+
+
+def _visible_dataset(ctx: Context, dataset: str) -> dict:
+    cfg = DATASETS.get(dataset)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Unknown dataset '{dataset}'")
+    visible = deepcopy(cfg)
+    if not ctx.can("salary.view"):
+        visible["fields"] = [f for f in visible["fields"] if f["key"] not in COMPENSATION_FIELDS]
+    return visible
+
+
+def _validate_report_fields(r: "ReportRun", cfg: dict) -> None:
+    available = {f["key"] for f in cfg["fields"]}
+    requested = set(r.fields or [])
+    hidden = requested - available
+    hidden.update(f.field for f in r.filters if f.field not in available)
+    if r.group_by and r.group_by not in available and r.group_by != cfg.get("group_only"):
+        hidden.add(r.group_by)
+    if r.sort_by and r.sort_by not in available and r.sort_by not in ("group", "headcount"):
+        hidden.add(r.sort_by)
+    if hidden:
+        raise HTTPException(status_code=403, detail="Report field is not available to this role")
 
 AGGREGATIONS = ["sum", "avg", "min", "max", "count"]
 FILTER_OPS = ["eq", "ne", "contains", "gt", "gte", "lt", "lte"]
@@ -347,13 +379,14 @@ GROUPABLE = ["department", "location", "cost_centre", "employee_code", "period",
 
 @router.get("/datasets")
 async def datasets(ctx: Context = Depends(require_perm("reports.view"))):
+    visible_datasets = {key: _visible_dataset(ctx, key) for key in DATASETS}
     return {
         "datasets": [{"key": k, "name": v["name"],
                       "fields": v["fields"], "time_field": v.get("time_field"),
                       "group_only": v.get("group_only"), "flatten": bool(v.get("flatten")),
                       "groupable": [g for g in GROUPABLE
                                     if g in {f["key"] for f in v["fields"]} or g == v.get("group_only")]}
-                     for k, v in DATASETS.items()],
+                     for k, v in visible_datasets.items()],
         "aggregations": AGGREGATIONS,
         "filter_ops": FILTER_OPS,
     }
@@ -361,9 +394,8 @@ async def datasets(ctx: Context = Depends(require_perm("reports.view"))):
 
 @router.post("/run")
 async def run_report(r: ReportRun, ctx: Context = Depends(require_perm("reports.view"))):
-    cfg = DATASETS.get(r.dataset)
-    if not cfg:
-        raise HTTPException(status_code=404, detail=f"Unknown dataset '{r.dataset}'")
+    cfg = _visible_dataset(ctx, r.dataset)
+    _validate_report_fields(r, cfg)
     rows = await _rows_for(ctx, cfg, r)
     columns, out, totals = _project(rows, cfg, r)
     labels = {f["key"]: f["label"] for f in cfg["fields"]}
@@ -379,9 +411,8 @@ async def run_report(r: ReportRun, ctx: Context = Depends(require_perm("reports.
 @router.post("/export")
 async def export_report(r: ReportRun, format: str = "csv",
                         ctx: Context = Depends(require_perm("reports.export"))):
-    cfg = DATASETS.get(r.dataset)
-    if not cfg:
-        raise HTTPException(status_code=404, detail=f"Unknown dataset '{r.dataset}'")
+    cfg = _visible_dataset(ctx, r.dataset)
+    _validate_report_fields(r, cfg)
     rows = await _rows_for(ctx, cfg, r)
     columns, out, _ = _project(rows, cfg, r)
     return _export_response(columns, out, format, cfg["name"])

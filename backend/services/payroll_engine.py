@@ -199,22 +199,27 @@ def compute_employee_payroll(
     # covered, the contribution is computed on wages actually paid.
     esi_rule = rules.get("esi")
     esi_gross_limit = float(esi_rule["params"]["gross_limit"]) if esi_rule else 0
-    esi_eligibility_wage = _r2(max(gross_earnings, gross_monthly))
+    esi_payable_wage = _r2(sum(
+        e["amount"] for e in earnings if e.get("esi_applicable", True)
+    ))
+    esi_eligibility_wage = _r2(sum(
+        e.get("monthly", e["amount"]) for e in earnings if e.get("esi_applicable", True)
+    ))
     if employee.get("esi_applicable") and esi_rule is not None \
             and esi_eligibility_wage <= esi_gross_limit:
         rule_refs.append(rule_ref(esi_rule))
         p = esi_rule["params"]
-        ee_esi = _r2(gross_earnings * float(p["employee_rate"]))
-        er_esi = _r2(gross_earnings * float(p["employer_rate"]))
+        ee_esi = _r2(esi_payable_wage * float(p["employee_rate"]))
+        er_esi = _r2(esi_payable_wage * float(p["employer_rate"]))
         deductions.append({
             "code": "ESI", "name": "ESI (employee)", "category": "deduction", "amount": ee_esi,
             "explanation": {
                 "input": f"Full-month wage ₹{esi_eligibility_wage:,.2f} ≤ threshold "
-                         f"₹{esi_gross_limit:,.0f} · contribution on paid wages ₹{gross_earnings:,.2f}",
+                         f"₹{esi_gross_limit:,.0f} · contribution on paid ESI wages ₹{esi_payable_wage:,.2f}",
                 "rule": f"{esi_rule.get('source', 'ESI rules')} v{esi_rule.get('version')}"
                         + ("" if esi_rule.get("verified") else " · requires statutory verification"),
                 "formula": f"Employee {pct(float(p['employee_rate']))} of gross",
-                "calculation": f"{pct(float(p['employee_rate']))} × ₹{gross_earnings:,.2f} = ₹{ee_esi:,.2f}",
+                "calculation": f"{pct(float(p['employee_rate']))} × ₹{esi_payable_wage:,.2f} = ₹{ee_esi:,.2f}",
             },
         })
         employer_contributions.append({
@@ -224,14 +229,14 @@ def compute_employee_payroll(
                 "input": f"Gross ₹{gross_earnings:,.2f}",
                 "rule": f"{esi_rule.get('source', 'ESI rules')} v{esi_rule.get('version')}",
                 "formula": f"Employer {pct(float(p['employer_rate']))} of gross",
-                "calculation": f"{pct(float(p['employer_rate']))} × ₹{gross_earnings:,.2f} = ₹{er_esi:,.2f}",
+                "calculation": f"{pct(float(p['employer_rate']))} × ₹{esi_payable_wage:,.2f} = ₹{er_esi:,.2f}",
             },
         })
 
     # ---- statutory: PT & LWF (state-aware) ------------------------------------
     state = employee.get("state") or employee.get("work_state")
     pt_rule = rules.get("pt")
-    if pt_rule is not None:
+    if employee.get("pt_applicable") and pt_rule is not None:
         rule_refs.append(rule_ref(pt_rule))
         slab = pt_applicable_amount(pt_rule["params"], gross_earnings)
         if slab > 0:
@@ -247,24 +252,23 @@ def compute_employee_payroll(
                 },
             })
     lwf_rule = rules.get("lwf")
-    if lwf_rule is not None:
+    if employee.get("lwf_applicable") and lwf_rule is not None:
         p = lwf_rule["params"]
-        # LWF is periodic in most states (monthly / half-yearly / annual). The deduction
-        # month(s) come from the rule version (`frequency` + `deduction_months`); when the
-        # rule version does not specify them, the existing monthly behaviour is preserved
-        # and the explanation says so rather than assuming a schedule.
-        frequency = str(p.get("frequency") or "monthly").lower()
+        # The rule version must provide the frequency or the months due. Do not infer
+        # monthly deductions when the rule contains no timing metadata.
+        frequency = str(p.get("frequency") or "").lower()
         deduction_months = p.get("deduction_months")
+        has_deduction_schedule = "deduction_months" in p and deduction_months is not None
+        if not has_deduction_schedule and frequency != "monthly":
+            raise ValueError("LWF rule must define deduction_months or a monthly frequency")
         period_month = int(period.split("-")[1])
-        due_this_month = True
-        if deduction_months:
-            due_this_month = period_month in [int(m) for m in deduction_months]
+        due_this_month = (period_month in [int(m) for m in deduction_months]
+                          if has_deduction_schedule else True)
         if due_this_month:
             rule_refs.append(rule_ref(lwf_rule))
-            schedule_note = (f"{frequency} contribution"
+            schedule_note = (f"{frequency or 'scheduled'} contribution"
                              + (f", deducted in month(s) {sorted(int(m) for m in deduction_months)}"
-                                if deduction_months
-                                else " (no deduction schedule in this rule version — deducted monthly)"))
+                                if has_deduction_schedule else ""))
             ee_lwf = _r2(float(p["employee"]))
             er_lwf = _r2(float(p["employer"]))
             deductions.append({
@@ -298,7 +302,7 @@ def compute_employee_payroll(
         regime = employee.get("tax_regime") or "new"
         regime_key = "income_tax_new_regime" if regime == "new" else "income_tax_old_regime"
         projection = tax_engine.project_annual_taxable(
-            taxable_gross, months_elapsed_in_fy, regime, it_rule["params"],
+            taxable_gross, 12, regime, it_rule["params"],
             declarations, basic_monthly, hra_monthly,
         )
         tax = tax_engine.compute_income_tax(projection["taxable"], it_rule["params"])

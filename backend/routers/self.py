@@ -9,9 +9,11 @@ from pydantic import BaseModel
 
 from lib.auth import Context, get_ctx, new_id
 from lib.db import db
+from routers.tax import DeclarationsIn, _empty_declarations, _resolve_fy
 from services import payroll_engine
 from services.payroll_engine import mask_account, mask_pan
 from services.payslips import build_payslip
+from services.tax_year_profiles import upsert_declarations
 
 router = APIRouter(prefix="/v1/me", tags=["Self-service"])
 
@@ -97,29 +99,23 @@ async def tax_compare(ctx: Context = Depends(get_ctx)):
 
 
 @router.get("/tax/declarations")
-async def tax_declarations(ctx: Context = Depends(get_ctx)):
+async def tax_declarations(ctx: Context = Depends(get_ctx), financial_year: str | None = None):
     emp = await _me(ctx)
-    doc = await db.tax_declarations.find_one({"org_id": ctx.org_id, "employee_id": emp["id"]},
-                                             {"_id": 0, "org_id": 0})
-    return doc or {"deduction_80c": 0, "deduction_80d": 0, "annual_rent_paid": 0,
-                   "metro": False, "other_income": 0}
+    fy = _resolve_fy(financial_year)
+    doc = await db.tax_year_declarations.find_one(
+        {"org_id": ctx.org_id, "employee_id": emp["id"], "financial_year": fy},
+        {"_id": 0, "org_id": 0})
+    return doc or _empty_declarations(fy)
 
 
 @router.put("/tax/declarations")
-async def save_tax_declarations(input: dict, ctx: Context = Depends(get_ctx)):
+async def save_tax_declarations(input: DeclarationsIn, ctx: Context = Depends(get_ctx),
+                                financial_year: str | None = None):
     emp = await _me(ctx)
-    allowed = {k: input.get(k, 0 if k != "metro" else False)
-               for k in ("deduction_80c", "deduction_80d", "annual_rent_paid", "metro", "other_income")}
-    existing = await db.tax_declarations.find_one({"org_id": ctx.org_id, "employee_id": emp["id"]})
-    if existing:
-        await db.tax_declarations.update_one(
-            {"id": existing["id"], "org_id": ctx.org_id}, {"$set": allowed})
-    else:
-        await db.tax_declarations.insert_one({
-            "id": new_id(), "org_id": ctx.org_id, "employee_id": emp["id"], **allowed,
-        })
-    return await db.tax_declarations.find_one({"org_id": ctx.org_id, "employee_id": emp["id"]},
-                                              {"_id": 0, "org_id": 0})
+    fy = _resolve_fy(financial_year)
+    doc = await upsert_declarations(ctx.org_id, emp["id"], fy, input, ctx.user)
+    doc.pop("org_id", None)
+    return doc
 
 
 @router.get("/leave/balances")

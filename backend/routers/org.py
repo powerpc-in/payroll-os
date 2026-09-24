@@ -12,6 +12,8 @@ from jurisdictions.registry import list_jurisdictions
 from lib.dates import today_iso
 from lib.rbac import ROLES, permissions_for_role
 from services import payroll_service
+from services.statutory_profile_models import StatutoryEstablishmentIn
+from services.tax_year_profiles import TaxYearProfileIn, upsert_tax_profile
 
 router = APIRouter(prefix="/v1", tags=["Organisation"])
 
@@ -43,6 +45,7 @@ class EmployeeSeed(BaseModel):
     tax_regime: str = "new"
     pf_applicable: bool = True
     esi_applicable: bool = True
+    tax_year_profile: TaxYearProfileIn | None = None
 
 
 class OnboardingIn(BaseModel):
@@ -53,6 +56,7 @@ class OnboardingIn(BaseModel):
     basic_pct: float = 40
     hra_pct: float = 50
     locations: list[dict] = []
+    statutory_establishments: list[StatutoryEstablishmentIn] = []
     leave_types: list[dict] = []
     employees: list[EmployeeSeed] = []
     run_test_payroll: bool = False
@@ -94,6 +98,8 @@ async def update_org(input: OrgUpdate, ctx: Context = Depends(require_perm("sett
 
 @router.post("/org/onboarding")
 async def onboarding(input: OnboardingIn, ctx: Context = Depends(require_perm("settings.manage"))):
+    if any(seed.tax_year_profile for seed in input.employees) and not ctx.can("tax.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: tax.manage")
     org = await db.organisations.find_one({"id": ctx.org_id})
     if not org:
         raise HTTPException(status_code=404, detail="Organisation not found")
@@ -121,8 +127,17 @@ async def onboarding(input: OnboardingIn, ctx: Context = Depends(require_perm("s
         if loc.get("name"):
             await db.locations.insert_one({
                 "id": new_id(), "org_id": ctx.org_id, "name": loc["name"],
-                "city": loc.get("city", ""), "state": loc.get("state", state), "created_at": now(),
+                "city": loc.get("city", ""), "state": loc.get("state", state),
+                "municipality": loc.get("municipality", ""), "created_at": now(),
             })
+
+    for establishment in input.statutory_establishments:
+        if establishment.location_id and not await db.locations.find_one(
+                {"id": establishment.location_id, "org_id": ctx.org_id}, {"_id": 1}):
+            raise HTTPException(status_code=422, detail="Work location not found in this organisation")
+        establishment_doc = establishment.model_dump(mode="json")
+        establishment_doc.update({"id": new_id(), "org_id": ctx.org_id, "created_at": now()})
+        await db.statutory_establishments.insert_one(establishment_doc)
 
     components = [
         {"code": "BASIC", "name": "Basic Salary", "calc": "pct_gross", "value": input.basic_pct,
@@ -184,6 +199,8 @@ async def onboarding(input: OnboardingIn, ctx: Context = Depends(require_perm("s
             "emergency_contact_name": None, "emergency_contact_phone": None,
             "user_id": None, "created_at": now(),
         })
+        if seed.tax_year_profile:
+            await upsert_tax_profile(ctx.org_id, emp_id, seed.tax_year_profile, ctx.user)
         await db.salary_assignments.insert_one({
             "id": new_id(), "org_id": ctx.org_id, "employee_id": emp_id,
             "structure_id": structure["id"], "gross_monthly": seed.gross_monthly,

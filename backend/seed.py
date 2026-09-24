@@ -3,10 +3,8 @@
     cd /app/backend && python seed.py
 
 Idempotent: re-running wipes and rebuilds ONLY the demo organisation's data.
-All people, emails and identifiers are fictional. Statutory values are stored as
-versioned rules marked verified=False ('Requires statutory verification') and the
-demo org explicitly opts into computing with them — the UI and payslips show the
-verification badge everywhere.
+All people, emails and identifiers are fictional. The seed verifies only rule
+documents backed by official sources and configures unverified values to fail closed.
 """
 
 import asyncio
@@ -20,8 +18,9 @@ from services import payroll_service
 ORG_NAME = "Kaveri Textiles Pvt Ltd"
 DOMAIN = "kaveritextiles.example"
 PASSWORD = "Demo@12345"
-EFF_FROM = "2025-04-01"  # FY 2025-26 rules, left open-ended (versioned; never silently invented)
+EFF_FROM = "2025-04-01"  # Default start for the FY 2025-26 seed rules
 SOURCE_DATE = "2025-03-31"
+STATUTORY_REVIEW_DATE = "2026-09-24"
 
 SURCHARGE = [
     {"above": 5000000, "rate": 0.10}, {"above": 10000000, "rate": 0.15},
@@ -44,9 +43,40 @@ STATUTORY_RULES = [
          "rebate": {"taxable_limit": 500000, "max_rebate": 12500},
          "standard_deduction": 50000, "cap_80c": 150000, "cap_80d": 25000,
          "surcharge": SURCHARGE, "cess_rate": 0.04}},
+    {"rule_type": "income_tax_new_regime", "state": None,
+     "version": 2, "effective_from": "2026-04-01", "effective_to": "2027-03-31",
+     "source_date": "2026-03-30", "verified": False,
+     "source": "Income-tax Act, 2025 §§19, 156, 202; Finance Act, 2026 (Act 4 of 2026), 2026-03-30; https://www.incometaxindia.gov.in/Documents/Act/Income-tax-Act-2025.pdf; https://egazette.gov.in/WriteReadData/2026/271439.pdf",
+     "unverified_notes": "Official FY 2026-27 values recorded, but calculation remains blocked: section 156 rebate is resident-individual-only and employee tax-residency is not represented. The existing engine also lacks section 156 marginal relief above ₹12,00,000. Demo new-regime projections are below that threshold, but employee residency is still required to apply the rebate safely.",
+     "params": {
+         "slabs": [{"up_to": 400000, "rate": 0}, {"up_to": 800000, "rate": 0.05},
+                   {"up_to": 1200000, "rate": 0.10}, {"up_to": 1600000, "rate": 0.15},
+                   {"up_to": 2000000, "rate": 0.20}, {"up_to": 2400000, "rate": 0.25},
+                   {"up_to": None, "rate": 0.30}],
+         "rebate": {"taxable_limit": 1200000, "max_rebate": 60000},
+         "standard_deduction": 75000,
+         "surcharge": [{"above": 5000000, "rate": 0.10}, {"above": 10000000, "rate": 0.15},
+                       {"above": 20000000, "rate": 0.25}, {"above": 50000000, "rate": 0.25}],
+         "cess_rate": 0.04}},
+    {"rule_type": "income_tax_old_regime", "state": None,
+     "version": 2, "effective_from": "2026-04-01", "effective_to": "2027-03-31",
+     "source_date": "2026-03-30", "verified": False,
+     "source": "Income-tax Act, 2025 §§19, 156, First Schedule; Finance Act, 2026 (Act 4 of 2026), 2026-03-30; https://www.incometaxindia.gov.in/Documents/Act/Income-tax-Act-2025.pdf; https://egazette.gov.in/WriteReadData/2026/271439.pdf",
+     "unverified_notes": "Official FY 2026-27 values recorded for resident individuals under age 60 with ordinary salary income. Calculation remains blocked because section 156 rebate eligibility is resident-only and employee tax-residency is not represented. The model's deduction inputs represent only standard deduction, 80C, 80D and HRA; other old-regime exemptions/deductions are outside this rule model. The official FY 2026-27 HRA schedule includes Bengaluru at 50%, while the seeded Rohan Iyer and Vihaan Kapoor declarations have metro=false despite their seeded city being Bengaluru; those employee inputs cannot be corrected within this statutory-data-only change.",
+     "params": {
+         "slabs": [{"up_to": 250000, "rate": 0}, {"up_to": 500000, "rate": 0.05},
+                   {"up_to": 1000000, "rate": 0.20}, {"up_to": None, "rate": 0.30}],
+         "rebate": {"taxable_limit": 500000, "max_rebate": 12500},
+         "standard_deduction": 50000, "cap_80c": 150000, "cap_80d": 25000,
+         "surcharge": [{"above": 5000000, "rate": 0.10}, {"above": 10000000, "rate": 0.15},
+                       {"above": 20000000, "rate": 0.25}, {"above": 50000000, "rate": 0.37}],
+         "cess_rate": 0.04}},
     {"rule_type": "provident_fund", "state": None, "source": "EPF Act, 1952 / EPF Scheme, 1952",
      "params": {"employee_rate": 0.12, "employer_rate": 0.12, "eps_rate": 0.0833, "wage_ceiling": None}},
-    {"rule_type": "employee_state_insurance", "state": None, "source": "ESI Act, 1948",
+    {"rule_type": "employee_state_insurance", "state": None,
+     "source": "ESIC Citizen's Charter (wage ceiling INR 21,000; contribution rates effective 2019-07-01): https://www.esic.gov.in/attachments/circularfile/c88a59d227d9002f3721de4adc370757.pdf; ESIC Performance Budget (wage ceiling effective 2017-01-01): https://dmn.esic.gov.in/attachments/publicationfile/6735242cb3eb4f4f2285d4eee55ee3b2.pdf",
+     "effective_from": "2019-07-01", "source_date": STATUTORY_REVIEW_DATE, "verified": True,
+     "notes": "Reviewed against official ESIC sources on 2026-09-24. Standard employee threshold/rates only; employees with disability and daily-wage contribution exemption require separate employee data/rule handling.",
      "params": {"employee_rate": 0.0075, "employer_rate": 0.0325, "gross_limit": 21000}},
     {"rule_type": "gratuity", "state": None, "source": "Payment of Gratuity Act, 1972 §4",
      "params": {"eligibility_years": 5, "formula": "15/26 × last drawn basic × years"}},
@@ -105,6 +135,71 @@ def prev_period() -> str:
     return prev.strftime("%Y-%m")
 
 
+def statutory_effective_dates(spec: dict) -> tuple[str, str | None]:
+    """Bound seeded tax data to its declared FY without changing the demo period."""
+    tax_rule = spec["rule_type"] in ("income_tax_new_regime", "income_tax_old_regime")
+    return spec.get("effective_from", EFF_FROM), spec.get(
+        "effective_to", "2026-03-31" if tax_rule else None)
+
+
+def unverified_rule_note(rule_type: str, state: str | None) -> str:
+    if rule_type.startswith("income_tax_"):
+        return ("Unverified: FY 2025-26 / AY 2026-27 data only; validate the consumed parameter "
+                "set, regime-specific surcharge treatment, rebate eligibility and dated official "
+                "sources before calculation.")
+    if rule_type == "provident_fund":
+        return ("Unverified: the stored wage_ceiling is null although EPFO publishes a ₹15,000 "
+                "ceiling for the standard scope. Establishment coverage/rate category, member and "
+                "EPS eligibility, and any higher-wage election are not represented sufficiently "
+                "to verify this rule for the demo employees.")
+    if rule_type == "professional_tax":
+        if state == "KA":
+            return ("Unverified: the stored threshold/rate is not backed here by an enacted, "
+                    "currently effective official Karnataka schedule; the located state-hosted "
+                    "amendment material is a bill. Effective date and current applicability remain "
+                    "unconfirmed.")
+        if state == "MH":
+            return ("Unverified: the current MAHAGST schedule includes lower salary bands, a "
+                    "female-specific threshold and ₹300 February deduction above ₹10,000. The "
+                    "engine cannot represent gender-specific bands or a February amount; its PT "
+                    "wage basis also needs confirmation against statutory salary/wages.")
+        if state == "DL":
+            return ("Unverified: no current employee payroll PT schedule was verified. Delhi's "
+                    "municipal legislation makes this a local-body discretionary levy; municipality "
+                    "and applicable current rate data are absent from the employee/rule model.")
+        if state == "TG":
+            return ("Unverified: the Telangana Commercial Taxes Department schedule publishes "
+                    "salary bands (up to ₹15,000 nil; ₹15,001–₹20,000 ₹150/month; above ₹20,000 "
+                    "₹200/month), but the current schedule page does not provide sufficient "
+                    "effective-date metadata for a versioned August 2026 rule. The seeded single "
+                    "threshold is also not that full schedule.")
+        return (f"Unverified for {state}: current state schedule, wage basis, thresholds, "
+                "deduction amount/frequency, effective dates and applicable employee categories "
+                "must be validated against the state authority.")
+    if rule_type == "lwf":
+        if state == "KA":
+            return ("Unverified: Karnataka Labour Welfare Board Form D confirms employee ₹20 and "
+                    "employer ₹40, but says the annual statement is sent by 15 January and does "
+                    "not establish the payroll deduction month(s)/timing needed by this engine.")
+        if state == "MH":
+            return ("Unverified: current official contribution amounts, covered employee scope, "
+                    "effective date and statutory payroll deduction month(s) were not confirmed "
+                    "from the located state source.")
+        if state == "DL":
+            return ("Unverified: Delhi Labour Department publishes employee ₹0.75 and employer "
+                    "₹2.25 every six months; the seed employer amount ₹22.50 conflicts. The "
+                    "official page does not state the payroll deduction month(s), so the rule "
+                    "remains blocked and its amount has not been changed.")
+        if state == "TG":
+            return ("Unverified: the Telangana Labour Department source says the main fund source "
+                    "is ₹7 per worker per year, not the seeded employee/employer ₹20/₹20 split. "
+                    "The split, effective date and payroll deduction timing are not established.")
+        return (f"Unverified for {state}: contribution amounts, covered establishment/employee "
+                "scope, effective dates and statutory deduction months/frequency are not fully "
+                "validated. Missing timing metadata keeps calculation blocked.")
+    return "Unverified: authoritative current source and effective-date metadata are required."
+
+
 async def wipe(org_id: str) -> None:
     collections = ["employees", "departments", "locations", "designations", "cost_centres",
                    "salary_structures", "salary_assignments", "salary_components",
@@ -132,19 +227,26 @@ async def main() -> None:
         "address": "Plot 14, Peenya Industrial Area", "city": "Bengaluru", "state": "KA",
         "onboarded": True,
         "payroll_settings": {"pay_frequency": "monthly", "pay_day": "last-working-day",
-                             "accept_unverified_statutory_values": True},
+                             "accept_unverified_statutory_values": False},
         "created_at": now(),
     }
     await db.organisations.insert_one(org)
 
-    # --- statutory rules (versioned, unverified — requires statutory verification) ---
+    # --- statutory rules (versioned, fail-closed unless verified) ---
     for spec in STATUTORY_RULES:
+        # Version-1 income-tax data covers FY 2025-26 only. Current-year documents
+        # carry their own dates; never extend an older version into a later FY.
+        effective_from, effective_to = statutory_effective_dates(spec)
+        verified = spec.get("verified", False)
         await db.statutory_rules.insert_one({
             "id": new_id(), "org_id": org_id, "jurisdiction": "IN",
             "rule_type": spec["rule_type"], "state": spec["state"], "params": spec["params"],
-            "effective_from": EFF_FROM, "effective_to": None, "version": 1,
-            "source": spec["source"], "source_date": SOURCE_DATE, "verified": False,
-            "active": True, "notes": "Demo seed — every value requires statutory verification before production use.",
+            "effective_from": effective_from,
+            "effective_to": effective_to, "version": spec.get("version", 1),
+            "source": spec["source"], "source_date": spec.get("source_date", SOURCE_DATE),
+            "verified": verified,
+            "active": True, "notes": spec.get("notes") if verified else spec.get(
+                "unverified_notes", unverified_rule_note(spec["rule_type"], spec["state"])),
             "created_by": "seed", "created_at": now(),
         })
 

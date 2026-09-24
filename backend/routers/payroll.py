@@ -103,8 +103,8 @@ async def add_input(run_id: str, input: InputIn, ctx: Context = Depends(require_
     run = await db.payroll_runs.find_one({"id": run_id, "org_id": ctx.org_id})
     if not run:
         raise HTTPException(status_code=404, detail="Payroll run not found")
-    if run["status"] not in ("draft", "calculated", "review"):
-        raise HTTPException(status_code=409, detail="Inputs can only be added before approval")
+    if run["status"] != "draft":
+        raise HTTPException(status_code=409, detail="Payroll inputs can only be changed while the run is draft")
     emp = await db.employees.find_one({"id": input.employee_id, "org_id": ctx.org_id})
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found in this organisation")
@@ -123,6 +123,11 @@ async def add_input(run_id: str, input: InputIn, ctx: Context = Depends(require_
 
 @router.delete("/runs/{run_id}/inputs/{input_id}")
 async def delete_input(run_id: str, input_id: str, ctx: Context = Depends(require_perm("payroll.calculate"))):
+    run = await db.payroll_runs.find_one({"id": run_id, "org_id": ctx.org_id})
+    if not run:
+        raise HTTPException(status_code=404, detail="Payroll run not found")
+    if run["status"] != "draft":
+        raise HTTPException(status_code=409, detail="Payroll inputs can only be changed while the run is draft")
     await db.payroll_inputs.delete_one({"id": input_id, "run_id": run_id, "org_id": ctx.org_id})
     return {"ok": True}
 
@@ -161,12 +166,28 @@ async def _transition(run_id: str, ctx: Context, from_status: str, to_status: st
         raise HTTPException(
             status_code=409,
             detail=f"Run is '{run['status']}' — this action requires '{from_status}'")
-    await db.payroll_runs.update_one({"id": run_id}, {"$set": {"status": to_status}})
-    await db.payroll_employees.update_many({"run_id": run_id}, {"$set": {"run_status": to_status}})
+    if to_status in ("approved", "locked"):
+        error_rows = await db.payroll_employees.count_documents({
+            "run_id": run_id, "org_id": ctx.org_id, "status": "error",
+        })
+        if error_rows:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot {to_status} payroll while {error_rows} employee row(s) have errors")
+
+    # Compare-and-set makes this transition single-winner under concurrent requests.
+    changed = await db.payroll_runs.update_one(
+        {"id": run_id, "org_id": ctx.org_id, "status": from_status},
+        {"$set": {"status": to_status}},
+    )
+    if not changed.matched_count:
+        raise HTTPException(status_code=409, detail="Payroll run state changed; reload and retry")
+    await db.payroll_employees.update_many(
+        {"run_id": run_id, "org_id": ctx.org_id}, {"$set": {"run_status": to_status}})
     await emit(ctx.org_id, event, actor=ctx.user, entity="payroll_run", entity_id=run_id,
                old={"status": from_status}, new={"status": to_status}, summary=summary,
                data={"run_id": run_id, "period": run["period"], "status": to_status})
-    return await db.payroll_runs.find_one({"id": run_id}, {"_id": 0})
+    return await db.payroll_runs.find_one({"id": run_id, "org_id": ctx.org_id}, {"_id": 0})
 
 
 @router.post("/runs/{run_id}/submit-review")
@@ -245,13 +266,19 @@ async def reverse(run_id: str, input: TransitionIn, ctx: Context = Depends(requi
     reverse_to = {"approved": "review", "review": "calculated", "calculated": "draft"}.get(run["status"])
     if not reverse_to:
         raise HTTPException(status_code=409, detail="Locked runs are immutable and cannot be reversed")
-    await db.payroll_runs.update_one({"id": run_id}, {"$set": {"status": reverse_to}})
-    await db.payroll_employees.update_many({"run_id": run_id}, {"$set": {"run_status": reverse_to}})
+    changed = await db.payroll_runs.update_one(
+        {"id": run_id, "org_id": ctx.org_id, "status": run["status"]},
+        {"$set": {"status": reverse_to}},
+    )
+    if not changed.matched_count:
+        raise HTTPException(status_code=409, detail="Payroll run state changed; reload and retry")
+    await db.payroll_employees.update_many(
+        {"run_id": run_id, "org_id": ctx.org_id}, {"$set": {"run_status": reverse_to}})
     await emit(ctx.org_id, "payroll.reversed", actor=ctx.user, entity="payroll_run", entity_id=run_id,
                old={"status": run["status"]}, new={"status": reverse_to},
                summary=f"Payroll {run['period']} reversed from {run['status']} to {reverse_to}"
                        + (f": {input.note}" if input.note else ""))
-    return await db.payroll_runs.find_one({"id": run_id}, {"_id": 0})
+    return await db.payroll_runs.find_one({"id": run_id, "org_id": ctx.org_id}, {"_id": 0})
 
 
 @router.get("/payslips/{run_id}/{employee_id}")

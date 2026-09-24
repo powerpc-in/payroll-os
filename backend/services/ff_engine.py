@@ -64,7 +64,7 @@ async def compute_settlement(org: dict, emp: dict, input_: dict) -> dict:
     if locked_run:
         row = await db.payroll_employees.find_one(
             {"org_id": org_id, "run_id": locked_run["id"], "employee_id": emp["id"]})
-        covered = bool(row)
+        covered = bool(row and row.get("status") == "ok")
     if covered:
         notes.append(f"Salary for {period} was already paid through the locked payroll run "
                      f"{locked_run['id'][:8]} — it is not repeated here.")

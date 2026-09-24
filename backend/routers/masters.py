@@ -19,6 +19,7 @@ class NameIn(BaseModel):
     name: str
     city: str | None = None
     state: str | None = None
+    municipality: str | None = None
 
 
 def _collection(kind: str):
@@ -43,7 +44,8 @@ async def create_master(kind: str, input: NameIn, ctx: Context = Depends(require
     if kind not in ("departments", "locations", "designations", "cost_centres"):
         raise HTTPException(status_code=404, detail="Unknown master type")
     doc = {"id": new_id(), "org_id": ctx.org_id, "name": input.name.strip(),
-           "city": input.city or "", "state": input.state or "", "created_at": now()}
+           "city": input.city or "", "state": input.state or "",
+           "municipality": input.municipality or "", "created_at": now()}
     await _collection(kind).insert_one(doc)
     doc.pop("_id", None)
     return doc

@@ -66,7 +66,8 @@ async def get_status_checks():
 # Resource routers — all versioned under /api/v1/*, folded into api_router
 from routers import (auth, attendance, audit, compliance, dashboards, documents, employees,
                      imports, integrations, leave, loans, masters, notifications, org,
-                     payroll, reimbursements, reports, salary, settlements, tax, webhooks)
+                     payroll, reimbursements, reports, salary, settlements, statutory_profiles,
+                     tax, webhooks)
 from routers import self as self_router
 
 for _router in (auth.router, org.router, employees.router, masters.router, salary.router,
@@ -74,6 +75,7 @@ for _router in (auth.router, org.router, employees.router, masters.router, salar
                 payroll.router, tax.router, compliance.router, reports.router,
                 dashboards.router, webhooks.router, integrations.router, audit.router,
                 notifications.router, imports.router, documents.router, settlements.router,
+                statutory_profiles.router,
                 self_router.router):
     api_router.include_router(_router)
 

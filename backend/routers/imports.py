@@ -3,13 +3,16 @@ error report and clearly-identified partial imports (spec §29)."""
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from lib.auth import Context, new_id, require_perm
 from lib.db import db
 from lib.events import emit
+from services.statutory_profile_models import EmploymentStatutoryProfileIn
+from services.employment_statutory_profiles import insert_profile, validate_org_references
+from services.tax_year_profiles import TaxYearProfileIn, upsert_tax_profile
 
 router = APIRouter(prefix="/v1/imports", tags=["Imports"])
 
@@ -30,6 +33,8 @@ class EmployeeRow(BaseModel):
     tax_regime: str = "new"
     pf_applicable: bool = True
     esi_applicable: bool = True
+    statutory_profile: EmploymentStatutoryProfileIn | None = None
+    tax_year_profile: TaxYearProfileIn | None = None
 
 
 class EmployeeImport(BaseModel):
@@ -48,6 +53,10 @@ async def employee_template(ctx: Context = Depends(require_perm("imports.manage"
 
 @router.post("/employees")
 async def import_employees(input: EmployeeImport, ctx: Context = Depends(require_perm("imports.manage"))):
+    if any(row.statutory_profile for row in input.rows) and not ctx.can("compliance.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: compliance.manage")
+    if any(row.tax_year_profile for row in input.rows) and not ctx.can("tax.manage"):
+        raise HTTPException(status_code=403, detail="Missing permission: tax.manage")
     org = await db.organisations.find_one({"id": ctx.org_id})
     structure = await db.salary_structures.find_one({"org_id": ctx.org_id})
     if not structure:
@@ -65,6 +74,12 @@ async def import_employees(input: EmployeeImport, ctx: Context = Depends(require
             row_errors.append("joining_date must be YYYY-MM-DD")
         if row.tax_regime not in ("old", "new"):
             row_errors.append("tax_regime must be 'old' or 'new'")
+        if row.statutory_profile:
+            try:
+                await validate_org_references(ctx.org_id, row.statutory_profile.work_location_id,
+                                              row.statutory_profile.establishment_id)
+            except HTTPException as exc:
+                row_errors.append(str(exc.detail))
         if row_errors:
             errors.append({"row": i + 1, "name": row.name, "errors": row_errors})
             continue
@@ -95,6 +110,10 @@ async def import_employees(input: EmployeeImport, ctx: Context = Depends(require
             "emergency_contact_name": None, "emergency_contact_phone": None,
             "user_id": None, "created_at": now(),
         })
+        if row.statutory_profile:
+            await insert_profile(ctx.org_id, emp_id, row.statutory_profile)
+        if row.tax_year_profile:
+            await upsert_tax_profile(ctx.org_id, emp_id, row.tax_year_profile, ctx.user)
         await db.salary_assignments.insert_one({
             "id": new_id(), "org_id": ctx.org_id, "employee_id": emp_id,
             "structure_id": structure["id"], "gross_monthly": row.gross_monthly,
