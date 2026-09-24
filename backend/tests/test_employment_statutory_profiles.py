@@ -126,13 +126,14 @@ async def test_employee_cannot_modify_establishment_coverage():
 
 
 @pytest.mark.asyncio
-async def test_profile_context_feeds_pf_and_state_rules_for_effective_period(monkeypatch):
+@pytest.mark.parametrize("membership_start", ["2020-03-01", "2026-08-01"])
+async def test_profile_context_feeds_pf_and_state_rules_for_effective_period(monkeypatch, membership_start):
     from services import employment_statutory_profiles as profile_service
 
     effective = profile_doc(
         "profile-1", "2026-01-01", work_location_id="loc-1", establishment_id="est-1",
         work_state="KA", pf_applicable=True, epf_membership_status="member",
-        eps_applicable=True, membership_effective_from="2020-03-01",
+        eps_applicable=True, membership_effective_from=membership_start,
         pf_on_higher_wages=False, pt_applicable=True, pt_employee_category="standard",
         lwf_applicable=True,
     )
@@ -165,6 +166,91 @@ async def test_profile_context_feeds_pf_and_state_rules_for_effective_period(mon
         ("professional_tax", "2026-08-01", "KA"),
         ("lwf", "2026-08-01", "KA"),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("membership_start", "eps_applicable", "expected_error"),
+    [
+        ("2026-09-01", True, "not effective for this payroll period"),
+        (None, True, "effective date is missing"),
+        ("2020-03-01", False, "cannot safely calculate PF without EPS applicability"),
+    ],
+)
+async def test_pf_profile_requires_period_valid_membership_context(
+    monkeypatch, membership_start, eps_applicable, expected_error,
+):
+    from services import employment_statutory_profiles as profile_service
+
+    effective = profile_doc(
+        "profile-1", "2026-01-01", establishment_id="est-1", pf_applicable=True,
+        epf_membership_status="member", eps_applicable=eps_applicable,
+        membership_effective_from=membership_start, pf_on_higher_wages=False,
+    )
+    establishment = {"id": "est-1", "org_id": "org-1", "effective_from": "2025-01-01",
+                     "pf_covered": True}
+    monkeypatch.setattr(profile_service, "db", SimpleNamespace(
+        employment_statutory_profiles=Collection([effective]), locations=Collection(),
+        statutory_establishments=Collection([establishment])))
+
+    async def fake_get_rule(*args, **kwargs):
+        return {"id": args[2], "rule_type": args[2], "verified": True, "params": {}}
+
+    monkeypatch.setattr(payroll_service, "get_rule", fake_get_rule)
+    with pytest.raises(RuleUnavailable, match=expected_error):
+        await payroll_service.resolve_employee_rules(
+            {"id": "org-1", "jurisdiction": "IN", "payroll_settings": {}},
+            {"id": "emp-1", "pf_applicable": True, "tax_regime": "new"},
+            "2026-08-01")
+
+
+@pytest.mark.asyncio
+async def test_expired_or_future_pf_profile_cannot_fall_back_to_legacy_membership(monkeypatch):
+    from services import employment_statutory_profiles as profile_service
+
+    future = profile_doc("future", "2026-09-01", pf_applicable=True,
+                         epf_membership_status="member", eps_applicable=True,
+                         membership_effective_from="2020-01-01", pf_on_higher_wages=False)
+    monkeypatch.setattr(profile_service, "db", SimpleNamespace(
+        employment_statutory_profiles=Collection([future]), locations=Collection(),
+        statutory_establishments=Collection()))
+    with pytest.raises(RuleUnavailable, match="No effective statutory profile"):
+        await payroll_service.resolve_employee_rules(
+            {"id": "org-1", "jurisdiction": "IN", "payroll_settings": {}},
+            {"id": "emp-1", "pf_applicable": True, "tax_regime": "new"},
+            "2026-08-01")
+
+
+@pytest.mark.asyncio
+async def test_legacy_pf_employee_without_tenant_profile_keeps_compatibility(monkeypatch):
+    from services import employment_statutory_profiles as profile_service
+
+    other_tenant_profile = profile_doc(
+        "other-tenant-profile", "2026-01-01", pf_applicable=True,
+        epf_membership_status="member", eps_applicable=True,
+        membership_effective_from="2020-01-01", pf_on_higher_wages=False,
+    )
+    other_tenant_profile["org_id"] = "org-2"
+    monkeypatch.setattr(profile_service, "db", SimpleNamespace(
+        employment_statutory_profiles=Collection([other_tenant_profile]), locations=Collection(),
+        statutory_establishments=Collection()))
+    calls = []
+
+    async def fake_get_rule(org_id, jurisdiction, rule_type, on_date, state=None, allow_unverified=False):
+        calls.append(rule_type)
+        return {"id": rule_type, "rule_type": rule_type, "verified": True, "params": {}}
+
+    monkeypatch.setattr(payroll_service, "get_rule", fake_get_rule)
+    rules = await payroll_service.resolve_employee_rules(
+        {"id": "org-1", "jurisdiction": "IN", "payroll_settings": {}},
+        {"id": "emp-1", "pf_applicable": True, "pf_on_higher_wages": True,
+         "esi_applicable": False, "pt_applicable": False, "lwf_applicable": False,
+         "tax_regime": "new"},
+        "2026-08-01")
+
+    assert rules["pf"]["rule_type"] == "provident_fund"
+    assert rules["__employee_overrides"]["pf_on_higher_wages"] is True
+    assert calls == ["income_tax_new_regime", "provident_fund"]
 
 
 @pytest.mark.asyncio

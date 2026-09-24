@@ -90,6 +90,12 @@ async def resolve_employee_rules(org: dict, employee: dict, on_date: str) -> dic
             elif not profile.get("membership_effective_from"):
                 raise RuleUnavailable("employment_profile", jur, state,
                                       "PF membership effective date is missing from the employment profile")
+            elif not _effective_date_key(profile.get("membership_effective_from")):
+                raise RuleUnavailable("employment_profile", jur, state,
+                                      "PF membership effective date is invalid in the employment profile")
+            elif _effective_date_key(profile.get("membership_effective_from")) > on_date:
+                raise RuleUnavailable("employment_profile", jur, state,
+                                      "PF membership is not effective for this payroll period")
             elif profile.get("pf_on_higher_wages") is None:
                 raise RuleUnavailable("employment_profile", jur, state,
                                       "Higher-wage PF election status is missing from the employment profile")

@@ -83,8 +83,18 @@ async def current_profile(org_id: str, employee_id: str, on_date: str) -> dict |
 async def resolve_context(org_id: str, employee: dict, on_date: str,
                           jurisdiction: str = "IN") -> tuple[dict | None, dict | None, dict | None]:
     """Return period profile and establishment; all lookups are tenant scoped."""
-    profile = await current_profile(org_id, employee["id"], on_date)
+    profiles = await db.employment_statutory_profiles.find({
+        "org_id": org_id, "employee_id": employee["id"],
+    }, {"_id": 0}).to_list(500)
+    profile = select_effective_profile(profiles, org_id, employee["id"], on_date)
     if not profile:
+        # Legacy-only employees keep their historical applicability fields. Once an
+        # employee has statutory profile history, however, an out-of-period profile
+        # must not make those legacy PF fields an implicit membership fallback.
+        if profiles and employee.get("pf_applicable"):
+            raise RuleUnavailable("employment_profile", jurisdiction,
+                                  employee.get("work_state") or employee.get("state"),
+                                  "No effective statutory profile is available to establish PF membership for this payroll period")
         return None, None, None
     location = None
     if profile.get("work_location_id"):
